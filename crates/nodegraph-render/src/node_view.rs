@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
-use dominator::{Dom, clone, svg, events, EventOptions};
+use dominator::{html, Dom, clone, svg, events, EventOptions};
 use futures_signals::signal::{Mutable, SignalExt};
 use futures_signals::map_ref;
 
 use nodegraph_core::graph::node::{NodeHeader, MuteState};
 use nodegraph_core::graph::port::{PortDirection, PortSocketType, PortLabel, PortIndex};
-use nodegraph_core::layout::{HEADER_HEIGHT, PORT_HEIGHT, NODE_MIN_WIDTH, PORT_RADIUS, Vec2, compute_node_layout};
+use nodegraph_core::layout::{HEADER_HEIGHT, PORT_HEIGHT, NODE_MIN_WIDTH, PORT_RADIUS, Vec2};
 use nodegraph_core::store::EntityId;
 use nodegraph_core::types::socket_type::SocketType;
 
@@ -22,7 +22,6 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     let selection = gs.selection.clone();
 
     let graph = gs.graph.borrow();
-    let _layout = compute_node_layout(&graph, node_id);
     let ports = graph.node_ports(node_id).to_vec();
     let mut input_ports = Vec::new();
     let mut output_ports = Vec::new();
@@ -85,42 +84,84 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
             .attr("fill", &format!("rgb({},{},{})", hr, hg, hb))
         }))
 
-        // Header text
-        .child(svg!("text", {
-            .attr("x", "12")
-            .attr("y", &format!("{}", HEADER_HEIGHT / 2.0 + 4.0))
-            .attr("fill", "white")
-            .attr("font-size", "11")
-            .attr("font-weight", "bold")
-            .attr("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-            .text_signal(header_signal.signal_cloned().map(|h| h.title))
+        // HTML content via foreignObject — title and port labels
+        .child(svg!("foreignObject", {
+            .attr("x", "0")
+            .attr("y", "0")
+            .attr("width", &format!("{}", NODE_MIN_WIDTH))
+            .attr("height", &format!("{}", total_height))
+            .attr("pointer-events", "none")
+
+            .child(html!("div", {
+                .attr("xmlns", "http://www.w3.org/1999/xhtml")
+                .style("width", "100%")
+                .style("height", "100%")
+                .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
+                .style("user-select", "none")
+                .style("pointer-events", "none")
+
+                // Header
+                .child(html!("div", {
+                    .style("height", &format!("{}px", HEADER_HEIGHT))
+                    .style("padding", "0 12px")
+                    .style("display", "flex")
+                    .style("align-items", "center")
+                    .style("color", "white")
+                    .style("font-weight", "bold")
+                    .style("font-size", "11px")
+                    .style("white-space", "nowrap")
+                    .style("overflow", "hidden")
+                    .style("text-overflow", "ellipsis")
+                    .style("box-sizing", "border-box")
+                    .text_signal(header_signal.signal_cloned().map(|h| h.title))
+                }))
+
+                // Port rows
+                .children((0..num_rows).map(|i| {
+                    let input_label = input_ports.get(i).map(|(_, _, l, _)| l.clone());
+                    let output_label = output_ports.get(i).map(|(_, _, l, _)| l.clone());
+                    html!("div", {
+                        .style("height", &format!("{}px", PORT_HEIGHT))
+                        .style("display", "flex")
+                        .style("justify-content", "space-between")
+                        .style("align-items", "center")
+                        .style("padding", &format!("0 {}px", PORT_RADIUS + 8.0))
+                        .style("box-sizing", "border-box")
+                        .style("font-size", "10px")
+                        .style("color", "#ccc")
+
+                        .child(html!("span", {
+                            .text(&input_label.unwrap_or_default())
+                        }))
+                        .child(html!("span", {
+                            .text(&output_label.unwrap_or_default())
+                        }))
+                    })
+                }).collect::<Vec<_>>())
+            }))
         }))
 
-        // Input port circles + labels
-        .children(input_ports.iter().enumerate().map(|(i, &(pid, st, ref label, _))| {
+        // SVG port circles — at exact layout coordinates (NOT affected by foreignObject)
+        .children(input_ports.iter().enumerate().map(|(i, &(pid, st, _, _))| {
             let [cr, cg, cb] = st.default_color();
             let cy = HEADER_HEIGHT + (i as f64 + 0.5) * PORT_HEIGHT;
-            render_port(pid, st, PortDirection::Input, 0.0, cy, cr, cg, cb, label, gs)
+            render_port(pid, st, PortDirection::Input, 0.0, cy, cr, cg, cb, gs)
         }).collect::<Vec<_>>())
 
-        // Output port circles + labels
-        .children(output_ports.iter().enumerate().map(|(i, &(pid, st, ref label, _))| {
+        .children(output_ports.iter().enumerate().map(|(i, &(pid, st, _, _))| {
             let [cr, cg, cb] = st.default_color();
             let cy = HEADER_HEIGHT + (i as f64 + 0.5) * PORT_HEIGHT;
-            render_port(pid, st, PortDirection::Output, NODE_MIN_WIDTH, cy, cr, cg, cb, label, gs)
+            render_port(pid, st, PortDirection::Output, NODE_MIN_WIDTH, cy, cr, cg, cb, gs)
         }).collect::<Vec<_>>())
     })
 }
 
 fn render_port(
     port_id: EntityId, socket_type: SocketType, direction: PortDirection,
-    cx: f64, cy: f64, r: u8, g: u8, b: u8, label: &str, gs: &Rc<GraphSignals>,
+    cx: f64, cy: f64, r: u8, g: u8, b: u8, gs: &Rc<GraphSignals>,
 ) -> Dom {
-    let label = label.to_string();
-    let is_input = direction == PortDirection::Input;
-
     svg!("g", {
-        // Invisible larger hit target for easier clicking
+        // Invisible larger hit target
         .child(svg!("circle", {
             .attr("cx", &format!("{}", cx))
             .attr("cy", &format!("{}", cy))
@@ -141,7 +182,7 @@ fn render_port(
             )
         }))
 
-        // Visible port circle
+        // Visible port circle at exact layout position
         .child(svg!("circle", {
             .attr(ATTR_PORT_ID, &format!("{}", port_id.index))
             .attr("cx", &format!("{}", cx))
@@ -181,22 +222,6 @@ fn render_port(
                     }
                 }
             })
-        }))
-
-        // Port label
-        .child(svg!("text", {
-            .attr("y", &format!("{}", cy + 4.0))
-            .attr("fill", "#ccc")
-            .attr("font-size", "10")
-            .attr("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-            .attr("pointer-events", "none")
-            .apply(|b| if is_input {
-                b.attr("x", &format!("{}", cx + PORT_RADIUS + 6.0))
-            } else {
-                b.attr("x", &format!("{}", cx - PORT_RADIUS - 6.0))
-                 .attr("text-anchor", "end")
-            })
-            .text(&label)
         }))
     })
 }
