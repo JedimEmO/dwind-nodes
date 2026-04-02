@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use wasm_bindgen::JsCast;
 use futures_signals::signal::Mutable;
 use futures_signals::signal_vec::MutableVec;
 
@@ -15,6 +16,7 @@ use nodegraph_core::graph::port::PortDirection;
 use nodegraph_core::graph::connection::ConnectionEndpoints;
 use nodegraph_core::interaction::{InteractionController, InputEvent, SideEffect, InteractionState};
 use nodegraph_core::layout::{self, BezierPath, Vec2, PORT_RADIUS};
+use nodegraph_core::search::NodeTypeRegistry;
 use nodegraph_core::store::EntityId;
 use nodegraph_core::types::socket_type::SocketType;
 
@@ -51,6 +53,14 @@ pub struct GraphSignals {
     pub preview_wire: Mutable<Option<BezierPath>>,
     pub box_select_rect: Mutable<Option<(f64, f64, f64, f64)>>,
     pub cut_line_points: Mutable<Vec<(f64, f64)>>,
+
+    /// Node type registry — populated by the app
+    pub registry: Rc<RefCell<NodeTypeRegistry>>,
+    /// Search menu state: Some((world_x, world_y)) = open at position, None = closed
+    pub search_menu: Mutable<Option<(f64, f64)>>,
+    /// Pending connection from a noodle drop — (port_id, socket_type, from_output)
+    /// When set, search menu filters to compatible types and auto-connects after spawn.
+    pub pending_connection: Mutable<Option<(EntityId, SocketType, bool)>>,
 }
 
 impl GraphSignals {
@@ -71,6 +81,9 @@ impl GraphSignals {
             preview_wire: Mutable::new(None),
             box_select_rect: Mutable::new(None),
             cut_line_points: Mutable::new(Vec::new()),
+            registry: Rc::new(RefCell::new(NodeTypeRegistry::new())),
+            search_menu: Mutable::new(None),
+            pending_connection: Mutable::new(None),
         })
     }
 
@@ -89,6 +102,74 @@ impl GraphSignals {
         self.node_headers.borrow_mut().insert(node_id, Mutable::new(header));
         self.node_list.lock_mut().push_cloned(node_id);
         node_id
+    }
+
+    /// Spawn a node from a registry type definition at a world position.
+    /// If there's a pending connection, auto-connect to the first compatible port.
+    pub fn spawn_from_registry(&self, type_id: &str, position: (f64, f64)) {
+        let def = match self.registry.borrow().get(type_id) {
+            Some(d) => d.clone(),
+            None => return,
+        };
+
+        let mut all_ports: Vec<(PortDirection, SocketType, String)> = Vec::new();
+        for p in &def.input_ports {
+            all_ports.push((p.direction, p.socket_type, p.label.clone()));
+        }
+        for p in &def.output_ports {
+            all_ports.push((p.direction, p.socket_type, p.label.clone()));
+        }
+
+        let node_id = self.add_node(&def.display_name, position, all_ports);
+
+        // Auto-connect if there's a pending connection from noodle drop
+        if let Some((src_port, src_type, from_output)) = self.pending_connection.get() {
+            let graph = self.graph.borrow();
+            let new_ports = graph.node_ports(node_id).to_vec();
+            drop(graph);
+
+            // Find first compatible port on the new node
+            for &pid in &new_ports {
+                let graph = self.graph.borrow();
+                let dir = graph.world.get::<PortDirection>(pid).copied();
+                let st = graph.world.get::<nodegraph_core::graph::port::PortSocketType>(pid).map(|s| s.0);
+                drop(graph);
+
+                if let (Some(dir), Some(st)) = (dir, st) {
+                    if is_valid_connection_target(from_output, src_type, dir, st) {
+                        self.connect_ports(src_port, pid);
+                        break;
+                    }
+                }
+            }
+        }
+
+        self.pending_connection.set(None);
+        self.search_menu.set(None);
+    }
+
+    pub fn open_search_menu(&self, world_x: f64, world_y: f64) {
+        self.pending_connection.set(None);
+        self.search_menu.set(Some((world_x, world_y)));
+        // Focus the search input after dominator flushes the display change
+        wasm_bindgen_futures::spawn_local(async {
+            // Yield to let dominator update display:none → display:block
+            let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
+            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            // Now focus the input
+            if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+                if let Some(el) = doc.query_selector("[data-search-menu] input").ok().flatten() {
+                    if let Ok(html_el) = el.dyn_into::<web_sys::HtmlElement>() {
+                        let _ = html_el.focus();
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn close_search_menu(&self) {
+        self.search_menu.set(None);
+        self.pending_connection.set(None);
     }
 
     pub fn connect_ports(&self, source: EntityId, target: EntityId) -> Option<EntityId> {
@@ -151,10 +232,21 @@ impl GraphSignals {
                         self.connection_list.lock_mut().push_cloned(conn_id);
                         self.reconcile_connections();
                     }
+                    self.connecting_from.set(None);
+                } else {
+                    // Dropped on empty canvas — open search menu filtered to compatible types
+                    let world = match &event {
+                        InputEvent::MouseUp { world, .. } => *world,
+                        _ => Vec2::new(0.0, 0.0),
+                    };
+                    if let Some(cf) = self.connecting_from.get() {
+                        self.pending_connection.set(Some(cf));
+                        self.search_menu.set(Some((world.x, world.y)));
+                    }
+                    self.connecting_from.set(None);
                 }
                 self.controller.borrow_mut().state = InteractionState::Idle;
                 self.preview_wire.set(None);
-                self.connecting_from.set(None);
                 self.drop_target_port.set(None);
                 return;
             }

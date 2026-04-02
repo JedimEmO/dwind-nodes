@@ -13,20 +13,24 @@ pub enum SocketType {
     Object,
     Image,
     Custom(u32),
+    /// Pass-through type for reroute nodes — compatible with everything.
+    Any,
 }
 
 impl SocketType {
     /// Check if a connection from self (output) to other (input) is valid.
     /// Blender allows some implicit conversions (e.g. Float -> Int, Float -> Bool).
+    /// Any is compatible with everything (used by reroute nodes).
     pub fn is_compatible_with(&self, other: &SocketType) -> bool {
+        if *self == SocketType::Any || *other == SocketType::Any {
+            return true;
+        }
         if self == other {
             return true;
         }
-        // Custom types only connect to same custom ID
         if let (SocketType::Custom(a), SocketType::Custom(b)) = (self, other) {
             return a == b;
         }
-        // Numeric implicit conversions
         matches!(
             (self, other),
             (SocketType::Float, SocketType::Int)
@@ -56,6 +60,7 @@ impl SocketType {
             SocketType::Object => [237, 145, 36],     // orange
             SocketType::Image => [160, 100, 200],     // purple-ish
             SocketType::Custom(_) => [128, 128, 128], // gray
+            SocketType::Any => [200, 200, 200],       // light gray
         }
     }
 }

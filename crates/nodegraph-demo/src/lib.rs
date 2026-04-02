@@ -1,8 +1,63 @@
 use wasm_bindgen::prelude::*;
 use nodegraph_core::graph::port::PortDirection;
+use nodegraph_core::search::{NodeTypeDefinition, PortDefinition, NodeTypeRegistry};
 use nodegraph_core::types::socket_type::SocketType;
 use nodegraph_render::graph_signals::GraphSignals;
 use nodegraph_render::viewport_view::render_graph_editor;
+
+fn register_demo_node_types(reg: &mut NodeTypeRegistry) {
+    reg.register(NodeTypeDefinition {
+        type_id: "math_add".into(), display_name: "Math Add".into(), category: "Math".into(),
+        input_ports: vec![
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "A".into() },
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "B".into() },
+        ],
+        output_ports: vec![
+            PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Float, label: "Result".into() },
+        ],
+    });
+    reg.register(NodeTypeDefinition {
+        type_id: "color_mix".into(), display_name: "Color Mix".into(), category: "Color".into(),
+        input_ports: vec![
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Color, label: "Color 1".into() },
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Color, label: "Color 2".into() },
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "Factor".into() },
+        ],
+        output_ports: vec![
+            PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Color, label: "Color".into() },
+        ],
+    });
+    reg.register(NodeTypeDefinition {
+        type_id: "noise_texture".into(), display_name: "Noise Texture".into(), category: "Texture".into(),
+        input_ports: vec![
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Vector, label: "Vector".into() },
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "Scale".into() },
+        ],
+        output_ports: vec![
+            PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Color, label: "Color".into() },
+            PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Float, label: "Fac".into() },
+        ],
+    });
+    reg.register(NodeTypeDefinition {
+        type_id: "principled_bsdf".into(), display_name: "Principled BSDF".into(), category: "Shader".into(),
+        input_ports: vec![
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Color, label: "Base Color".into() },
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "Roughness".into() },
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "Metallic".into() },
+        ],
+        output_ports: vec![
+            PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Shader, label: "BSDF".into() },
+        ],
+    });
+    reg.register(NodeTypeDefinition {
+        type_id: "material_output".into(), display_name: "Material Output".into(), category: "Output".into(),
+        input_ports: vec![
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Shader, label: "Surface".into() },
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Shader, label: "Volume".into() },
+        ],
+        output_ports: vec![],
+    });
+}
 
 #[wasm_bindgen(start)]
 pub async fn main() {
@@ -10,6 +65,9 @@ pub async fn main() {
     dwind::stylesheet();
 
     let gs = GraphSignals::new();
+
+    // Register node types for the search menu
+    register_demo_node_types(&mut gs.registry.borrow_mut());
 
     // Build a demo graph
     let math_add = gs.add_node("Math Add", (50.0, 50.0), vec![

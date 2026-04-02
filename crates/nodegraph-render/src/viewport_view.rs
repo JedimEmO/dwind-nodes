@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::cell::Cell;
 
+use wasm_bindgen::JsCast;
 use dominator::{html, svg, Dom, clone, events, EventOptions};
 use futures_signals::signal::SignalExt;
 use futures_signals::signal_vec::SignalVecExt;
@@ -9,6 +10,7 @@ use futures_signals::map_ref;
 use crate::graph_signals::{GraphSignals, ATTR_VIEWPORT_INNER};
 use crate::node_view::render_node;
 use crate::connection_view::{render_connection, render_preview_wire, render_cut_line};
+use crate::search_menu::render_search_menu;
 use crate::event_bridge;
 
 pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
@@ -33,6 +35,19 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
         )
 
         .event(clone!(gs, container_rect => move |e: events::MouseDown| {
+            if gs.search_menu.get().is_some() {
+                // Check if the click is inside the search menu
+                if let Some(target) = e.target() {
+                    let target_el: Result<web_sys::Element, _> = target.dyn_into();
+                    if let Ok(el) = target_el {
+                        if el.closest("[data-search-menu]").ok().flatten().is_some() {
+                            return; // click inside menu — don't close
+                        }
+                    }
+                }
+                gs.close_search_menu();
+                return;
+            }
             event_bridge::on_mouse_down(&gs, e, container_rect.get());
         }))
         .global_event(clone!(gs, container_rect => move |e: events::MouseMove| {
@@ -54,6 +69,15 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                 let key = e.key();
                 let ctrl = e.ctrl_key();
                 let shift = e.shift_key();
+                // Escape always closes search menu first
+                if key == "Escape" {
+                    if gs.search_menu.get().is_some() {
+                        gs.close_search_menu();
+                        e.prevent_default();
+                        return;
+                    }
+                }
+
                 let handled = match key.as_str() {
                     "Delete" | "x" | "X" if !ctrl => { gs.delete_selected(); true }
                     "z" | "Z" if ctrl && shift => { gs.redo(); true }
@@ -62,6 +86,15 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                     "m" | "M" if !ctrl => { gs.toggle_mute_selected(); true }
                     "h" | "H" if !ctrl => { gs.toggle_collapse_selected(); true }
                     "a" | "A" if !ctrl && !shift => { gs.select_all(); true }
+                    "a" | "A" if shift && !ctrl => {
+                        // Open search menu at viewport center (world coords)
+                        let (px, py) = gs.pan.get();
+                        let z = gs.zoom.get();
+                        let wx = (400.0 - px) / z; // approximate center
+                        let wy = (300.0 - py) / z;
+                        gs.open_search_menu(wx, wy);
+                        true
+                    }
                     _ => false,
                 };
                 if handled { e.prevent_default(); }
@@ -105,11 +138,15 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                         render_node(node_id, &gs)
                     }))
                 )
+
             }))
 
             // Box select overlay (in world space, inside the transform group would scale it;
             // keep in screen space by applying inverse transform or separate group)
         }))
+
+        // Search menu (HTML, screen space, above SVG)
+        .child(render_search_menu(&gs))
 
         // Box select overlay in screen space (HTML div, outside SVG)
         .child(html!("div", {

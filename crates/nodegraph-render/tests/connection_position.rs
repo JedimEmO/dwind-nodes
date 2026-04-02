@@ -9,6 +9,7 @@ use nodegraph_core::graph::connection::ConnectionEndpoints;
 use nodegraph_core::interaction::{InputEvent, MouseButton, Modifiers};
 use nodegraph_core::layout::Vec2;
 use nodegraph_core::store::EntityId;
+use nodegraph_core::search::{NodeTypeDefinition, PortDefinition, NodeTypeRegistry};
 use nodegraph_core::types::socket_type::SocketType;
 use nodegraph_render::graph_signals::GraphSignals;
 use nodegraph_render::viewport_view::render_graph_editor;
@@ -722,4 +723,135 @@ fn test_replacing_input_connection() {
     // Connecting out2 to the same input should replace
     gs.connect_ports(out2, inp);
     assert_eq!(gs.graph.borrow().connection_count(), 1, "Old connection should be replaced");
+}
+
+// ============================================================
+// Search menu
+// ============================================================
+
+fn register_test_types(gs: &std::rc::Rc<GraphSignals>) {
+    let mut reg = gs.registry.borrow_mut();
+    reg.register(NodeTypeDefinition {
+        type_id: "math_add".into(), display_name: "Math Add".into(), category: "Math".into(),
+        input_ports: vec![
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "A".into() },
+        ],
+        output_ports: vec![
+            PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Float, label: "Result".into() },
+        ],
+    });
+    reg.register(NodeTypeDefinition {
+        type_id: "shader_out".into(), display_name: "Shader Output".into(), category: "Shader".into(),
+        input_ports: vec![
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Shader, label: "Surface".into() },
+        ],
+        output_ports: vec![],
+    });
+}
+
+#[wasm_bindgen_test]
+fn test_open_search_menu() {
+    let (gs, _, _, _, _) = new_two_node_graph();
+    register_test_types(&gs);
+
+    assert!(gs.search_menu.get().is_none());
+    gs.open_search_menu(200.0, 150.0);
+    assert_eq!(gs.search_menu.get(), Some((200.0, 150.0)));
+}
+
+#[wasm_bindgen_test]
+fn test_close_search_menu() {
+    let (gs, _, _, _, _) = new_two_node_graph();
+    register_test_types(&gs);
+
+    gs.open_search_menu(200.0, 150.0);
+    gs.close_search_menu();
+    assert!(gs.search_menu.get().is_none());
+    assert!(gs.pending_connection.get().is_none());
+}
+
+#[wasm_bindgen_test]
+fn test_spawn_from_registry() {
+    let (gs, _, _, _, _) = new_two_node_graph();
+    register_test_types(&gs);
+    let _tc = render_sync(&gs);
+
+    assert_eq!(gs.graph.borrow().node_count(), 2);
+
+    gs.open_search_menu(300.0, 300.0);
+    gs.spawn_from_registry("math_add", (300.0, 300.0));
+
+    assert_eq!(gs.graph.borrow().node_count(), 3);
+    assert!(gs.search_menu.get().is_none(), "Menu should close after spawn");
+}
+
+#[wasm_bindgen_test]
+fn test_noodle_drop_opens_search_with_pending() {
+    let (gs, _, _, out, _) = new_two_node_graph();
+    register_test_types(&gs);
+    let _tc = render_sync(&gs);
+
+    // Start connecting from output port
+    let out_pos = gs.port_world_pos(out).unwrap();
+    gs.start_connecting(out, out_pos, out_pos);
+
+    // Release on empty canvas
+    let far = Vec2::new(500.0, 500.0);
+    gs.handle_input(InputEvent::MouseUp {
+        screen: far, world: far,
+        button: MouseButton::Left, modifiers: Modifiers::default(),
+    });
+
+    // Search menu should be open with pending connection
+    assert!(gs.search_menu.get().is_some(), "Search menu should open on noodle drop");
+    assert!(gs.pending_connection.get().is_some(), "Pending connection should be set");
+}
+
+#[wasm_bindgen_test]
+fn test_spawn_from_registry_auto_connects() {
+    let (gs, _, _, out, _) = new_two_node_graph();
+    register_test_types(&gs);
+    let _tc = render_sync(&gs);
+
+    assert_eq!(gs.graph.borrow().connection_count(), 0);
+
+    // Simulate noodle drop → pending connection
+    let cf = {
+        let graph = gs.graph.borrow();
+        let dir = graph.world.get::<PortDirection>(out).copied().unwrap();
+        let st = graph.world.get::<nodegraph_core::graph::port::PortSocketType>(out).map(|s| s.0).unwrap();
+        let from_output = dir == PortDirection::Output;
+        (out, st, from_output)
+    };
+    gs.pending_connection.set(Some(cf));
+    gs.search_menu.set(Some((300.0, 300.0)));
+
+    // Spawn Math Add — has Float input, compatible with our Float output
+    gs.spawn_from_registry("math_add", (300.0, 300.0));
+
+    assert_eq!(gs.graph.borrow().node_count(), 3);
+    assert_eq!(gs.graph.borrow().connection_count(), 1, "Should auto-connect to spawned node");
+    assert!(gs.pending_connection.get().is_none());
+    assert!(gs.search_menu.get().is_none());
+}
+
+#[wasm_bindgen_test]
+fn test_spawn_incompatible_no_auto_connect() {
+    let (gs, _, _, out, _) = new_two_node_graph();
+    register_test_types(&gs);
+    let _tc = render_sync(&gs);
+
+    // Pending from Float output
+    let cf = {
+        let graph = gs.graph.borrow();
+        let st = graph.world.get::<nodegraph_core::graph::port::PortSocketType>(out).map(|s| s.0).unwrap();
+        (out, st, true)
+    };
+    gs.pending_connection.set(Some(cf));
+
+    // Spawn Shader Output — has Shader input, NOT compatible with Float
+    gs.spawn_from_registry("shader_out", (300.0, 300.0));
+
+    assert_eq!(gs.graph.borrow().node_count(), 3);
+    assert_eq!(gs.graph.borrow().connection_count(), 0, "Should NOT auto-connect to incompatible node");
 }
