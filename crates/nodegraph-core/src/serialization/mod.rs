@@ -17,6 +17,8 @@ pub struct SerializedNode {
     pub header: NodeHeader,
     pub position: (f64, f64),
     pub ports: Vec<SerializedPort>,
+    #[serde(default)]
+    pub is_reroute: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,11 +74,13 @@ impl NodeGraph {
                 });
             }
 
+            let is_reroute = self.world.get::<crate::graph::reroute::IsReroute>(node_id).is_some();
             nodes.push(SerializedNode {
                 id: node_id.index,
                 header: header.clone(),
                 position: pos,
                 ports,
+                is_reroute,
             });
         }
 
@@ -103,6 +107,9 @@ impl NodeGraph {
             if let Some(header) = graph.world.get_mut::<NodeHeader>(node_id) {
                 header.color = snode.header.color;
                 header.collapsed = snode.header.collapsed;
+            }
+            if snode.is_reroute {
+                graph.world.insert(node_id, crate::graph::reroute::IsReroute);
             }
             id_map.insert(snode.id, node_id);
 

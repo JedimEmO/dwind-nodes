@@ -10,6 +10,7 @@ use futures_signals::map_ref;
 use crate::graph_signals::{GraphSignals, ATTR_VIEWPORT_INNER};
 use crate::node_view::render_node;
 use crate::connection_view::{render_connection, render_preview_wire, render_cut_line};
+use crate::frame_view::render_frame;
 use crate::search_menu::render_search_menu;
 use crate::event_bridge;
 
@@ -86,6 +87,7 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                     "m" | "M" if !ctrl => { gs.toggle_mute_selected(); true }
                     "h" | "H" if !ctrl => { gs.toggle_collapse_selected(); true }
                     "a" | "A" if !ctrl && !shift => { gs.select_all(); true }
+                    "f" | "F" if !ctrl && !shift => { gs.create_frame_around_selected(); true }
                     "g" | "G" if !ctrl && !shift => { gs.group_selected(); true }
                     "g" | "G" if shift && !ctrl => { gs.ungroup_selected(); true }
                     "+" | "=" => { gs.add_group_io_port(); true }
@@ -121,6 +123,13 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                         }
                     }
                 })
+
+                // Frame layer (behind everything)
+                .children_signal_vec(
+                    gs.frame_list.signal_vec_cloned().map(clone!(gs => move |frame_id| {
+                        render_frame(frame_id, &gs)
+                    }))
+                )
 
                 // Connection layer (behind nodes)
                 .children_signal_vec(

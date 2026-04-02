@@ -13,10 +13,21 @@ use crate::graph_signals::GraphSignals;
 
 /// Compute port offset within its node — same formula as SVG circle placement in node_view.
 fn port_offset(graph: &nodegraph_core::graph::NodeGraph, port_id: EntityId) -> Option<Vec2> {
-    let _owner = graph.world.get::<PortOwner>(port_id)?.0;
+    let owner = graph.world.get::<PortOwner>(port_id)?.0;
     let dir = *graph.world.get::<PortDirection>(port_id)?;
-    let idx = graph.world.get::<PortIndex>(port_id)?.0 as f64;
 
+    // Reroute nodes place ports at the diamond edges, not standard layout positions
+    let is_reroute = graph.world.get::<nodegraph_core::graph::reroute::IsReroute>(owner).is_some();
+    if is_reroute {
+        let size = layout::REROUTE_SIZE;
+        let cx = match dir {
+            PortDirection::Input => -size,
+            PortDirection::Output => size,
+        };
+        return Some(Vec2::new(cx, 0.0));
+    }
+
+    let idx = graph.world.get::<PortIndex>(port_id)?.0 as f64;
     let cx = match dir {
         PortDirection::Input => 0.0,
         PortDirection::Output => NODE_MIN_WIDTH,

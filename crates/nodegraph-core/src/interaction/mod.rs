@@ -19,7 +19,6 @@ pub enum HitTarget {
     Port(EntityId),
     Connection(EntityId),
     Frame(EntityId),
-    Reroute(EntityId),
 }
 
 const CONNECTION_HIT_THRESHOLD: f64 = 8.0;
@@ -47,6 +46,13 @@ pub fn hit_test(_graph: &NodeGraph, cache: &LayoutCache, world_pos: Vec2) -> Hit
     for (&conn_id, path) in &cache.connection_paths {
         if path.distance_to_point(world_pos) <= CONNECTION_HIT_THRESHOLD {
             return HitTarget::Connection(conn_id);
+        }
+    }
+
+    // Check frames (lowest priority — behind everything else)
+    for (&frame_id, (rect, _)) in &cache.frame_rects {
+        if rect.contains(world_pos) {
+            return HitTarget::Frame(frame_id);
         }
     }
 
@@ -275,6 +281,34 @@ impl InteractionController {
                         effects.push(SideEffect::SelectionChanged);
 
                         // Begin dragging all selected nodes
+                        let node_ids: Vec<EntityId> = self.selection.selected.clone();
+                        let start_positions: Vec<(f64, f64)> = node_ids
+                            .iter()
+                            .map(|&id| {
+                                graph.world.get::<NodePosition>(id)
+                                    .map(|p| (p.x, p.y))
+                                    .unwrap_or((0.0, 0.0))
+                            })
+                            .collect();
+                        self.state = InteractionState::DraggingNodes {
+                            node_ids,
+                            start_positions,
+                            last_world: world,
+                        };
+                    }
+                    HitTarget::Frame(frame_id) => {
+                        // Select all member nodes and drag them
+                        let members = cache.frame_rects.get(&frame_id)
+                            .map(|(_, m)| m.clone())
+                            .unwrap_or_default();
+                        if !modifiers.shift {
+                            self.selection.clear();
+                        }
+                        for &nid in &members {
+                            self.selection.select(nid);
+                        }
+                        effects.push(SideEffect::SelectionChanged);
+
                         let node_ids: Vec<EntityId> = self.selection.selected.clone();
                         let start_positions: Vec<(f64, f64)> = node_ids
                             .iter()

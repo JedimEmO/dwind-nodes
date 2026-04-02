@@ -44,7 +44,13 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     let is_muted = graph.world.get::<MuteState>(node_id).map(|m| m.0).unwrap_or(false);
     let is_group = graph.world.get::<nodegraph_core::graph::group::SubgraphRoot>(node_id).is_some();
     let is_group_io = graph.world.get::<nodegraph_core::graph::GroupIOKind>(node_id).is_some();
+    let is_reroute = graph.world.get::<nodegraph_core::graph::reroute::IsReroute>(node_id).is_some();
     drop(editor);
+
+    // Reroute nodes render as a small diamond
+    if is_reroute {
+        return render_reroute(node_id, pos_signal, selection, &input_ports, &output_ports, gs);
+    }
 
     let num_rows = input_ports.len().max(output_ports.len());
     let total_height = HEADER_HEIGHT + num_rows as f64 * PORT_HEIGHT;
@@ -275,5 +281,53 @@ fn render_port(
                 }
             })
         }))
+    })
+}
+
+fn render_reroute(
+    node_id: EntityId,
+    pos_signal: Mutable<(f64, f64)>,
+    selection: Mutable<Vec<EntityId>>,
+    input_ports: &[(EntityId, SocketType, String, u32)],
+    output_ports: &[(EntityId, SocketType, String, u32)],
+    gs: &Rc<GraphSignals>,
+) -> Dom {
+    let size = nodegraph_core::layout::REROUTE_SIZE;
+    // Diamond shape centered at (0, 0) relative to node position
+    let diamond = format!("{},0 0,{} -{},0 0,-{}", size, size, size, size);
+
+    svg!("g", {
+        .attr(ATTR_NODE_ID, &format!("{}", node_id.index))
+        .attr_signal("transform", pos_signal.signal().map(|(x, y)| format!("translate({}, {})", x, y)))
+
+        // Diamond shape
+        .child(svg!("polygon", {
+            .attr("points", &diamond)
+            .attr("fill", "#444")
+            .attr("stroke", "#888")
+            .attr("stroke-width", "1.5")
+        }))
+
+        // Selection highlight
+        .child(svg!("polygon", {
+            .attr("points", &diamond)
+            .attr("fill", "none")
+            .attr_signal("stroke", {
+                let node_id = node_id;
+                selection.signal_cloned().map(move |sel| {
+                    if sel.contains(&node_id) { "#4a9eff" } else { "none" }
+                })
+            })
+            .attr("stroke-width", "2")
+        }))
+
+        // Port hit targets (input on left, output on right)
+        .children(input_ports.iter().map(|&(pid, st, _, _)| {
+            render_port(pid, st, PortDirection::Input, -size, 0.0, 200, 200, 200, gs)
+        }).collect::<Vec<_>>())
+
+        .children(output_ports.iter().map(|&(pid, st, _, _)| {
+            render_port(pid, st, PortDirection::Output, size, 0.0, 200, 200, 200, gs)
+        }).collect::<Vec<_>>())
     })
 }

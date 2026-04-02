@@ -37,8 +37,10 @@ pub struct GraphSignals {
 
     pub node_list: MutableVec<EntityId>,
     pub connection_list: MutableVec<EntityId>,
+    pub frame_list: MutableVec<EntityId>,
     pub node_positions: Rc<RefCell<HashMap<EntityId, Mutable<(f64, f64)>>>>,
     pub node_headers: Rc<RefCell<HashMap<EntityId, Mutable<NodeHeader>>>>,
+    pub frame_bounds: Rc<RefCell<HashMap<EntityId, Mutable<(f64, f64, f64, f64)>>>>,
 
     pub selection: Mutable<Vec<EntityId>>,
     pub pan: Mutable<(f64, f64)>,
@@ -68,8 +70,10 @@ impl GraphSignals {
             controller: Rc::new(RefCell::new(InteractionController::new())),
             node_list: MutableVec::new(),
             connection_list: MutableVec::new(),
+            frame_list: MutableVec::new(),
             node_positions: Rc::new(RefCell::new(HashMap::new())),
             node_headers: Rc::new(RefCell::new(HashMap::new())),
+            frame_bounds: Rc::new(RefCell::new(HashMap::new())),
             selection: Mutable::new(Vec::new()),
             pan: Mutable::new((0.0, 0.0)),
             zoom: Mutable::new(1.0),
@@ -140,7 +144,15 @@ impl GraphSignals {
         for p in &def.output_ports { all_ports.push((p.direction, p.socket_type, p.label.clone())); }
 
         self.save_undo();
+        let type_id_owned = def.type_id.clone();
         let node_id = self.add_node(&def.display_name, position, all_ports);
+
+        // Mark reroute nodes
+        if type_id_owned == "reroute" {
+            self.with_graph_mut(|g| {
+                g.world.insert(node_id, nodegraph_core::graph::reroute::IsReroute);
+            });
+        }
 
         if let Some((src_port, src_type, from_output)) = self.pending_connection.get() {
             let new_ports = self.with_graph(|g| g.node_ports(node_id).to_vec());
@@ -423,6 +435,14 @@ impl GraphSignals {
         }
     }
 
+    pub fn create_frame_around_selected(self: &Rc<Self>) {
+        let selected = self.selection.get_cloned();
+        if selected.is_empty() { return; }
+        self.save_undo();
+        self.with_graph_mut(|g| { g.add_frame("Frame", [80, 80, 120], &selected); });
+        self.full_sync();
+    }
+
     pub fn add_group_io_port(self: &Rc<Self>) {
         let selected = self.selection.get_cloned();
         if selected.len() != 1 { return; }
@@ -516,6 +536,23 @@ impl GraphSignals {
         }
         { let conns: Vec<EntityId> = self.with_graph(|g| g.world.query::<ConnectionEndpoints>().map(|(id, _)| id).collect());
           let mut l = self.connection_list.lock_mut(); l.clear(); for &id in &conns { l.push_cloned(id); } }
+        {
+            let editor = self.editor.borrow();
+            let graph = editor.current_graph();
+            let frames: Vec<EntityId> = graph.world.query::<nodegraph_core::graph::frame::FrameRect>().map(|(id, _)| id).collect();
+            let mut bounds = self.frame_bounds.borrow_mut();
+            let frame_set: std::collections::HashSet<EntityId> = frames.iter().copied().collect();
+            bounds.retain(|id, _| frame_set.contains(id));
+            for &fid in &frames {
+                if let Some(members) = graph.world.get::<nodegraph_core::graph::frame::FrameMembers>(fid) {
+                    let rect = layout::compute_frame_rect(graph, &members.0);
+                    let val = (rect.x, rect.y, rect.w, rect.h);
+                    if let Some(m) = bounds.get(&fid) { m.set(val); } else { bounds.insert(fid, Mutable::new(val)); }
+                }
+            }
+            drop(editor);
+            let mut l = self.frame_list.lock_mut(); l.clear(); for &id in &frames { l.push_cloned(id); }
+        }
         self.sync_selection();
     }
 
@@ -525,6 +562,14 @@ impl GraphSignals {
         let positions = self.node_positions.borrow();
         for (id, mutable) in positions.iter() {
             if let Some(pos) = graph.world.get::<NodePosition>(*id) { mutable.set((pos.x, pos.y)); }
+        }
+        // Recompute frame bounds from member positions
+        let bounds = self.frame_bounds.borrow();
+        for (&fid, mutable) in bounds.iter() {
+            if let Some(members) = graph.world.get::<nodegraph_core::graph::frame::FrameMembers>(fid) {
+                let rect = layout::compute_frame_rect(graph, &members.0);
+                mutable.set((rect.x, rect.y, rect.w, rect.h));
+            }
         }
     }
 
@@ -544,5 +589,8 @@ impl GraphSignals {
     }
     pub fn get_node_header_signal(&self, node_id: EntityId) -> Option<Mutable<NodeHeader>> {
         self.node_headers.borrow().get(&node_id).cloned()
+    }
+    pub fn get_frame_bounds_signal(&self, frame_id: EntityId) -> Option<Mutable<(f64, f64, f64, f64)>> {
+        self.frame_bounds.borrow().get(&frame_id).cloned()
     }
 }

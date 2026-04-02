@@ -236,6 +236,16 @@ impl NodeGraph {
             }
         }
         self.ports_by_node.remove(&node);
+
+        // Remove from any frame's member list
+        let frame_ids: Vec<EntityId> = self.world.query::<frame::FrameMembers>()
+            .map(|(id, _)| id).collect();
+        for fid in frame_ids {
+            if let Some(members) = self.world.get_mut::<frame::FrameMembers>(fid) {
+                members.0.retain(|&id| id != node);
+            }
+        }
+
         self.world.despawn(node);
     }
 
@@ -259,6 +269,28 @@ impl NodeGraph {
 
     pub fn node_count(&self) -> usize {
         self.world.query::<NodeHeader>().count()
+    }
+
+    /// Create a frame around the given nodes. Computes bounding rect with padding.
+    pub fn add_frame(&mut self, label: &str, color: [u8; 3], member_ids: &[EntityId]) -> EntityId {
+        use frame::{FrameLabel, FrameColor, FrameRect, FrameMembers};
+
+        let rect = crate::layout::compute_frame_rect(self, member_ids);
+        let frame_id = self.world.spawn();
+        self.world.insert(frame_id, FrameLabel(label.to_string()));
+        self.world.insert(frame_id, FrameColor(color));
+        self.world.insert(frame_id, FrameRect { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+        self.world.insert(frame_id, FrameMembers(member_ids.to_vec()));
+        frame_id
+    }
+
+    /// Remove a frame without affecting its member nodes.
+    pub fn remove_frame(&mut self, frame_id: EntityId) {
+        self.world.despawn(frame_id);
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.world.query::<frame::FrameRect>().count()
     }
 }
 

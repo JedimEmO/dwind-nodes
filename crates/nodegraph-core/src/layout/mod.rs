@@ -8,6 +8,7 @@ pub const HEADER_HEIGHT: f64 = 28.0;
 pub const PORT_HEIGHT: f64 = 22.0;
 pub const PORT_RADIUS: f64 = 6.0;
 pub const NODE_MIN_WIDTH: f64 = 160.0;
+pub const REROUTE_SIZE: f64 = 10.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Vec2 {
@@ -242,16 +243,50 @@ pub fn compute_preview_path(source_pos: Vec2, cursor_pos: Vec2, from_output: boo
     }
 }
 
+pub const FRAME_PADDING: f64 = 30.0;
+
+/// Compute the bounding rect of a frame from its member node positions.
+pub fn compute_frame_rect(graph: &NodeGraph, member_ids: &[EntityId]) -> Rect {
+    let mut min_x = f64::MAX;
+    let mut min_y = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut max_y = f64::MIN;
+
+    for &nid in member_ids {
+        if let Some(pos) = graph.world.get::<NodePosition>(nid) {
+            min_x = min_x.min(pos.x);
+            min_y = min_y.min(pos.y);
+            let num_ports = graph.node_ports(nid).len();
+            let h = HEADER_HEIGHT + num_ports as f64 * PORT_HEIGHT;
+            max_x = max_x.max(pos.x + NODE_MIN_WIDTH);
+            max_y = max_y.max(pos.y + h);
+        }
+    }
+
+    if min_x == f64::MAX {
+        return Rect::new(0.0, 0.0, 200.0, 100.0);
+    }
+
+    Rect::new(
+        min_x - FRAME_PADDING,
+        min_y - FRAME_PADDING,
+        (max_x - min_x) + FRAME_PADDING * 2.0,
+        (max_y - min_y) + FRAME_PADDING * 2.0,
+    )
+}
+
 /// Precomputed layout cache for all nodes in a graph.
 /// Used by hit testing and rendering to avoid recomputing layouts repeatedly.
 pub struct LayoutCache {
     pub layouts: std::collections::HashMap<EntityId, ComputedNodeLayout>,
     pub connection_paths: std::collections::HashMap<EntityId, BezierPath>,
+    pub frame_rects: std::collections::HashMap<EntityId, (Rect, Vec<EntityId>)>,
 }
 
 impl LayoutCache {
     pub fn compute(graph: &NodeGraph) -> Self {
         use crate::graph::connection::ConnectionEndpoints;
+        use crate::graph::frame::{FrameRect, FrameMembers};
 
         let mut layouts = std::collections::HashMap::new();
         for (node_id, _) in graph.world.query::<NodeHeader>() {
@@ -269,7 +304,15 @@ impl LayoutCache {
             }
         }
 
-        Self { layouts, connection_paths }
+        let mut frame_rects = std::collections::HashMap::new();
+        for (frame_id, _) in graph.world.query::<FrameRect>() {
+            if let Some(members) = graph.world.get::<FrameMembers>(frame_id) {
+                let rect = compute_frame_rect(graph, &members.0);
+                frame_rects.insert(frame_id, (rect, members.0.clone()));
+            }
+        }
+
+        Self { layouts, connection_paths, frame_rects }
     }
 
     pub fn node_layout(&self, node_id: EntityId) -> Option<&ComputedNodeLayout> {

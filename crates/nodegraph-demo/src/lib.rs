@@ -57,6 +57,15 @@ fn register_demo_node_types(reg: &mut NodeTypeRegistry) {
         ],
         output_ports: vec![],
     });
+    reg.register(NodeTypeDefinition {
+        type_id: "reroute".into(), display_name: "Reroute".into(), category: "Utility".into(),
+        input_ports: vec![
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into() },
+        ],
+        output_ports: vec![
+            PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into() },
+        ],
+    });
 }
 
 #[wasm_bindgen(start)]

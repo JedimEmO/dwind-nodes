@@ -841,3 +841,87 @@ fn segments_intersect_basic() {
         Vec2::new(6.0, -1.0), Vec2::new(6.0, 1.0),
     ));
 }
+
+// ============================================================
+// Frame hit testing and dragging
+// ============================================================
+
+#[test]
+fn hit_test_frame_detects_click_inside_frame() {
+    let mut graph = make_test_graph();
+    // Add a frame around all nodes
+    let nodes: Vec<EntityId> = graph.world.query::<crate::graph::node::NodeHeader>()
+        .map(|(id, _)| id).collect();
+    graph.add_frame("Test Frame", [80, 80, 120], &nodes);
+
+    let cache = LayoutCache::compute(&graph);
+    // Click inside the frame padding area (not on a node)
+    // Nodes are at (0,0) and (300,50), frame extends with 30px padding
+    // So frame goes from roughly (-30, -30) to (460+30, 50+height+30)
+    let target = hit_test(&graph, &cache, Vec2::new(-20.0, -20.0));
+    assert!(matches!(target, HitTarget::Frame(_)), "Click in frame padding should hit frame");
+}
+
+#[test]
+fn hit_test_node_over_frame() {
+    let mut graph = make_test_graph();
+    let nodes: Vec<EntityId> = graph.world.query::<crate::graph::node::NodeHeader>()
+        .map(|(id, _)| id).collect();
+    graph.add_frame("Test Frame", [80, 80, 120], &nodes);
+
+    let cache = LayoutCache::compute(&graph);
+    // Click on the center of node 1 (at 0,0, width=160, header=28)
+    let target = hit_test(&graph, &cache, Vec2::new(80.0, 14.0));
+    assert!(matches!(target, HitTarget::Node(_)), "Click on a node should hit node, not frame");
+}
+
+#[test]
+fn drag_frame_moves_all_member_nodes() {
+    let mut graph = make_test_graph();
+    let nodes: Vec<EntityId> = graph.world.query::<crate::graph::node::NodeHeader>()
+        .map(|(id, _)| id).collect();
+    // Frame only the first two nodes (n1 and n2)
+    let n1 = nodes.iter().find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 0.0).copied().unwrap();
+    let n2 = nodes.iter().find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 300.0).copied().unwrap();
+    let frame_members = vec![n1, n2];
+
+    let orig_n1 = graph.world.get::<NodePosition>(n1).unwrap().clone();
+    let orig_n2 = graph.world.get::<NodePosition>(n2).unwrap().clone();
+
+    graph.add_frame("Test Frame", [80, 80, 120], &frame_members);
+
+    let mut ctrl = InteractionController::new();
+
+    // Click inside frame padding (not on any node)
+    // Frame spans from about (-30, -30) to (460+30, height+30)
+    let click = Vec2::new(-20.0, -20.0);
+    let effects = ctrl.handle_event(InputEvent::MouseDown {
+        screen: click, world: click,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    }, &mut graph);
+
+    assert!(matches!(ctrl.state, InteractionState::DraggingNodes { .. }), "Should start dragging");
+    assert!(effects.iter().any(|e| matches!(e, SideEffect::SelectionChanged)), "Should select members");
+    assert_eq!(ctrl.selection.selected.len(), 2, "Both frame member nodes should be selected");
+
+    // Drag by (100, 50)
+    let move_to = Vec2::new(80.0, 30.0);
+    ctrl.handle_event(InputEvent::MouseMove {
+        screen: move_to, world: move_to,
+        modifiers: Modifiers::default(),
+    }, &mut graph);
+
+    ctrl.handle_event(InputEvent::MouseUp {
+        screen: move_to, world: move_to,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    }, &mut graph);
+
+    let new_n1 = graph.world.get::<NodePosition>(n1).unwrap();
+    let new_n2 = graph.world.get::<NodePosition>(n2).unwrap();
+    assert!((new_n1.x - (orig_n1.x + 100.0)).abs() < 1e-10, "N1 x should move by 100");
+    assert!((new_n1.y - (orig_n1.y + 50.0)).abs() < 1e-10, "N1 y should move by 50");
+    assert!((new_n2.x - (orig_n2.x + 100.0)).abs() < 1e-10, "N2 x should move by 100");
+    assert!((new_n2.y - (orig_n2.y + 50.0)).abs() < 1e-10, "N2 y should move by 50");
+}

@@ -1510,3 +1510,516 @@ fn test_nested_group_undo_redo_stress() {
     assert_eq!(gs.node_count(), 4, "After 2nd undo: A, B, C, D. Got {}", gs.node_count());
     assert_eq!(gs.connection_count(), 3, "After 2nd undo: 3 connections. Got {}", gs.connection_count());
 }
+
+// ============================================================
+// Frames
+// ============================================================
+
+#[wasm_bindgen_test]
+fn test_create_frame() {
+    let (gs, _n1, n2, _n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 0);
+
+    gs.select_single(n2);
+    gs.create_frame_around_selected();
+
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 1, "Should have 1 frame");
+    // Nodes should be unaffected
+    assert_eq!(gs.node_count(), 3);
+}
+
+#[wasm_bindgen_test]
+fn test_undo_create_frame() {
+    let (gs, _n1, n2, _n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    gs.select_single(n2);
+    gs.create_frame_around_selected();
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 1);
+
+    gs.undo();
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 0, "After undo: frame should be gone");
+    assert_eq!(gs.node_count(), 3, "Nodes unaffected");
+}
+
+#[wasm_bindgen_test]
+fn test_frame_has_correct_members() {
+    let (gs, n1, n2, _n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    // Select A and B
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.selection.set(vec![n1, n2]);
+    gs.create_frame_around_selected();
+
+    let members = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::frame::FrameMembers>()
+            .map(|(_, m)| m.0.len()).next().unwrap_or(0)
+    });
+    assert_eq!(members, 2, "Frame should have 2 members");
+}
+
+// ============================================================
+// Reroutes
+// ============================================================
+
+#[wasm_bindgen_test]
+fn test_spawn_reroute() {
+    let (gs, _, _, _, _) = new_two_node_graph();
+    register_test_types(&gs);
+    // Also register reroute
+    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
+        type_id: "reroute".into(),
+        display_name: "Reroute".into(),
+        category: "Utility".into(),
+        input_ports: vec![nodegraph_core::search::PortDefinition {
+            direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into(),
+        }],
+        output_ports: vec![nodegraph_core::search::PortDefinition {
+            direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into(),
+        }],
+    });
+    let _tc = render_sync(&gs);
+
+    gs.spawn_from_registry("reroute", (200.0, 200.0));
+
+    assert_eq!(gs.node_count(), 3, "Should have 2 original + 1 reroute");
+
+    // Check it has IsReroute marker
+    let has_reroute = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::reroute::IsReroute>().count()
+    });
+    assert_eq!(has_reroute, 1, "Should have 1 reroute node");
+}
+
+#[wasm_bindgen_test]
+fn test_reroute_has_any_ports() {
+    let gs = GraphSignals::new();
+    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
+        type_id: "reroute".into(),
+        display_name: "Reroute".into(),
+        category: "Utility".into(),
+        input_ports: vec![nodegraph_core::search::PortDefinition {
+            direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into(),
+        }],
+        output_ports: vec![nodegraph_core::search::PortDefinition {
+            direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into(),
+        }],
+    });
+    let _tc = render_sync(&gs);
+
+    gs.spawn_from_registry("reroute", (100.0, 100.0));
+
+    // Check port types are Any
+    let port_types = gs.with_graph(|g| {
+        let reroute_id = g.world.query::<nodegraph_core::graph::reroute::IsReroute>()
+            .map(|(id, _)| id).next().unwrap();
+        g.node_ports(reroute_id).iter().map(|&pid| {
+            g.world.get::<nodegraph_core::graph::port::PortSocketType>(pid).map(|s| s.0)
+        }).collect::<Vec<_>>()
+    });
+    assert_eq!(port_types.len(), 2);
+    assert_eq!(port_types[0], Some(SocketType::Any));
+    assert_eq!(port_types[1], Some(SocketType::Any));
+}
+
+#[wasm_bindgen_test]
+fn test_undo_spawn_reroute() {
+    let gs = GraphSignals::new();
+    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
+        type_id: "reroute".into(), display_name: "Reroute".into(), category: "Utility".into(),
+        input_ports: vec![nodegraph_core::search::PortDefinition {
+            direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into(),
+        }],
+        output_ports: vec![nodegraph_core::search::PortDefinition {
+            direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into(),
+        }],
+    });
+    let _tc = render_sync(&gs);
+
+    assert_eq!(gs.node_count(), 0);
+    gs.spawn_from_registry("reroute", (100.0, 100.0));
+    assert_eq!(gs.node_count(), 1);
+
+    gs.undo();
+    assert_eq!(gs.node_count(), 0, "After undo: reroute should be gone");
+}
+
+#[wasm_bindgen_test]
+fn test_frame_appears_in_frame_list() {
+    let (gs, n1, n2, _n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    assert_eq!(gs.frame_list.lock_ref().len(), 0);
+
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.selection.set(vec![n1, n2]);
+    gs.create_frame_around_selected();
+
+    assert_eq!(gs.frame_list.lock_ref().len(), 1, "frame_list should have 1 entry for SVG rendering");
+}
+
+#[wasm_bindgen_test]
+fn test_frame_rect_bounds_contain_members() {
+    let (gs, n1, n2, _n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    // A is at (0,0), B is at (200,0)
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.selection.set(vec![n1, n2]);
+    gs.create_frame_around_selected();
+
+    let rect = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::frame::FrameRect>()
+            .map(|(_, r)| r.clone()).next()
+    });
+    assert!(rect.is_some());
+    let rect = rect.unwrap();
+
+    // Frame should enclose both nodes with padding
+    assert!(rect.x < 0.0, "Frame x={} should be left of node A (at 0)", rect.x);
+    assert!(rect.y < 0.0, "Frame y={} should be above node A (at 0)", rect.y);
+    assert!(rect.x + rect.w > 200.0, "Frame right edge should be past node B (at 200)");
+    assert!(rect.w > 200.0, "Frame width={} should span both nodes", rect.w);
+}
+
+#[wasm_bindgen_test]
+fn test_undo_frame_clears_frame_list() {
+    let (gs, _n1, n2, _n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    gs.select_single(n2);
+    gs.create_frame_around_selected();
+    assert_eq!(gs.frame_list.lock_ref().len(), 1);
+
+    gs.undo();
+    assert_eq!(gs.frame_list.lock_ref().len(), 0, "frame_list should be empty after undo");
+}
+
+#[wasm_bindgen_test]
+fn test_connect_through_reroute() {
+    let gs = GraphSignals::new();
+    // Create source (Float output), reroute (Any in/out), sink (Float input)
+    let src = gs.add_node("Src", (0.0, 0.0), vec![
+        (PortDirection::Output, SocketType::Float, "Out".to_string()),
+    ]);
+    let sink = gs.add_node("Sink", (400.0, 0.0), vec![
+        (PortDirection::Input, SocketType::Float, "In".to_string()),
+    ]);
+    let reroute = gs.add_node("", (200.0, 0.0), vec![
+        (PortDirection::Input, SocketType::Any, "".to_string()),
+        (PortDirection::Output, SocketType::Any, "".to_string()),
+    ]);
+    gs.with_graph_mut(|g| {
+        g.world.insert(reroute, nodegraph_core::graph::reroute::IsReroute);
+    });
+    let _tc = render_sync(&gs);
+
+    // Get port IDs
+    let (src_out, reroute_in, reroute_out, sink_in) = gs.with_graph(|g| {
+        let sp = g.node_ports(src);
+        let rp = g.node_ports(reroute);
+        let dp = g.node_ports(sink);
+        (sp[0], rp[0], rp[1], dp[0])
+    });
+
+    // Connect Src → Reroute → Sink
+    gs.connect_ports(src_out, reroute_in);
+    gs.connect_ports(reroute_out, sink_in);
+
+    assert_eq!(gs.connection_count(), 2, "Should have 2 connections through reroute");
+
+    // Delete the reroute
+    gs.select_single(reroute);
+    gs.delete_selected();
+    assert_eq!(gs.node_count(), 2, "Reroute deleted, Src and Sink remain");
+    assert_eq!(gs.connection_count(), 0, "Connections through reroute removed");
+
+    // Undo → reroute + connections back
+    gs.undo();
+    assert_eq!(gs.node_count(), 3);
+    assert_eq!(gs.connection_count(), 2, "Connections restored after undo");
+}
+
+#[wasm_bindgen_test]
+fn test_reroute_in_node_list() {
+    let gs = GraphSignals::new();
+    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
+        type_id: "reroute".into(), display_name: "Reroute".into(), category: "Utility".into(),
+        input_ports: vec![nodegraph_core::search::PortDefinition {
+            direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into(),
+        }],
+        output_ports: vec![nodegraph_core::search::PortDefinition {
+            direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into(),
+        }],
+    });
+    let _tc = render_sync(&gs);
+
+    gs.spawn_from_registry("reroute", (100.0, 100.0));
+    assert_eq!(gs.node_list.lock_ref().len(), 1, "Reroute should be in node_list for SVG rendering");
+}
+
+#[wasm_bindgen_test]
+fn test_multiple_frames() {
+    let (gs, n1, n2, n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    // Frame around A
+    gs.select_single(n1);
+    gs.create_frame_around_selected();
+
+    // Frame around B+C
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.controller.borrow_mut().selection.select(n3);
+    gs.selection.set(vec![n2, n3]);
+    gs.create_frame_around_selected();
+
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 2);
+    assert_eq!(gs.frame_list.lock_ref().len(), 2);
+    assert_eq!(gs.node_count(), 3, "Nodes unaffected by frames");
+}
+
+// ── Frame deletion leaves nodes intact ──────────────────────────────
+#[wasm_bindgen_test]
+fn test_delete_frame_leaves_nodes() {
+    let (gs, _, _, out, inp) = new_two_node_graph();
+    let _tc = render_sync(&gs);
+    gs.connect_ports(out, inp);
+
+    let n1 = gs.node_list.lock_ref()[0];
+    let n2 = gs.node_list.lock_ref()[1];
+
+    // Create frame around both nodes
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.selection.set(vec![n1, n2]);
+    gs.create_frame_around_selected();
+
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 1);
+    assert_eq!(gs.node_count(), 2);
+
+    // Undo the frame creation (removes the frame)
+    gs.undo();
+
+    // Nodes and connections still exist
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 0);
+    assert_eq!(gs.node_count(), 2, "Nodes must survive frame deletion");
+    assert_eq!(gs.with_graph(|g| g.connection_count()), 1, "Connections must survive frame deletion");
+
+    // Redo restores the frame
+    gs.redo();
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 1);
+    assert_eq!(gs.node_count(), 2, "Nodes still intact after redo");
+}
+
+// ── Deleting a node cleans it from frame members ────────────────────
+#[wasm_bindgen_test]
+fn test_delete_node_cleans_frame_members() {
+    let (gs, _, _, _, _) = new_two_node_graph();
+    let _tc = render_sync(&gs);
+
+    let n1 = gs.node_list.lock_ref()[0];
+    let n2 = gs.node_list.lock_ref()[1];
+
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.selection.set(vec![n1, n2]);
+    gs.create_frame_around_selected();
+
+    // Verify frame has 2 members
+    let member_count = gs.with_graph(|g| {
+        use nodegraph_core::graph::frame::{FrameRect, FrameMembers};
+        let (fid, _) = g.world.query::<FrameRect>().next().unwrap();
+        g.world.get::<FrameMembers>(fid).unwrap().0.len()
+    });
+    assert_eq!(member_count, 2);
+
+    // Delete one node
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.selection.set(vec![n1]);
+    gs.delete_selected();
+
+    // Frame should now have 1 member
+    let member_count = gs.with_graph(|g| {
+        use nodegraph_core::graph::frame::{FrameRect, FrameMembers};
+        let (fid, _) = g.world.query::<FrameRect>().next().unwrap();
+        g.world.get::<FrameMembers>(fid).unwrap().0.len()
+    });
+    assert_eq!(member_count, 1, "Deleted node must be removed from frame members");
+}
+
+// ── Duplicate reroute preserves IsReroute marker ────────────────────
+#[wasm_bindgen_test]
+fn test_duplicate_reroute_preserves_marker() {
+    let (gs, _, _, _, _) = new_two_node_graph();
+    register_test_types(&gs);
+    // Register reroute type
+    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
+        type_id: "reroute".into(),
+        display_name: "Reroute".into(),
+        category: "Utility".into(),
+        input_ports: vec![nodegraph_core::search::PortDefinition {
+            direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into(),
+        }],
+        output_ports: vec![nodegraph_core::search::PortDefinition {
+            direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into(),
+        }],
+    });
+    let _tc = render_sync(&gs);
+
+    gs.spawn_from_registry("reroute", (200.0, 200.0));
+    assert_eq!(gs.node_count(), 3, "2 original + 1 reroute");
+
+    // Select the reroute and duplicate
+    let reroute_id = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::reroute::IsReroute>()
+            .next().unwrap().0
+    });
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(reroute_id);
+    gs.selection.set(vec![reroute_id]);
+    gs.duplicate_selected();
+
+    assert_eq!(gs.node_count(), 4, "2 original + 1 reroute + 1 duplicate");
+
+    // Both reroute nodes should have IsReroute
+    let reroute_count = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::reroute::IsReroute>().count()
+    });
+    assert_eq!(reroute_count, 2, "Duplicated reroute must preserve IsReroute marker");
+}
+
+// ── Frame bounds update when member nodes move ──────────────────────
+#[wasm_bindgen_test]
+fn test_frame_bounds_track_member_positions() {
+    let (gs, _, _, _, _) = new_two_node_graph();
+    let _tc = render_sync(&gs);
+
+    let n1 = gs.node_list.lock_ref()[0];
+    let n2 = gs.node_list.lock_ref()[1];
+
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.selection.set(vec![n1, n2]);
+    gs.create_frame_around_selected();
+
+    let frame_id = gs.with_graph(|g| {
+        use nodegraph_core::graph::frame::FrameRect;
+        g.world.query::<FrameRect>().next().unwrap().0
+    });
+
+    // Get initial bounds
+    let initial_bounds = gs.get_frame_bounds_signal(frame_id).unwrap().get();
+
+    use nodegraph_core::interaction::{InputEvent, MouseButton, Modifiers};
+    use nodegraph_core::layout::Vec2;
+
+    // Simulate a real drag of n1: click on it, move, release
+    // n1 is at (100, 100), click center of header
+    let click = Vec2::new(180.0, 114.0);
+    gs.handle_input(InputEvent::MouseDown {
+        screen: click, world: click,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+
+    // Move by (100, 100)
+    let drag_to = Vec2::new(280.0, 214.0);
+    gs.handle_input(InputEvent::MouseMove {
+        screen: drag_to, world: drag_to,
+        modifiers: Modifiers::default(),
+    });
+
+    gs.handle_input(InputEvent::MouseUp {
+        screen: drag_to, world: drag_to,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+
+    let updated_bounds = gs.get_frame_bounds_signal(frame_id).unwrap().get();
+    // Frame bounds should have changed because node moved
+    assert_ne!(initial_bounds, updated_bounds, "Frame bounds must update when member nodes move");
+}
+
+// ── Frame drag selects and moves all member nodes ───────────────────
+#[wasm_bindgen_test]
+fn test_frame_drag_moves_members() {
+    let (gs, _, _, _, _) = new_two_node_graph();
+    let _tc = render_sync(&gs);
+
+    let n1 = gs.node_list.lock_ref()[0];
+    let n2 = gs.node_list.lock_ref()[1];
+
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.selection.set(vec![n1, n2]);
+    gs.create_frame_around_selected();
+
+    // Get original positions
+    let orig_n1 = gs.with_graph(|g| {
+        let p = g.world.get::<nodegraph_core::graph::node::NodePosition>(n1).unwrap();
+        (p.x, p.y)
+    });
+    let orig_n2 = gs.with_graph(|g| {
+        let p = g.world.get::<nodegraph_core::graph::node::NodePosition>(n2).unwrap();
+        (p.x, p.y)
+    });
+
+    use nodegraph_core::interaction::{InputEvent, MouseButton, Modifiers};
+    use nodegraph_core::layout::Vec2;
+
+    // Click inside frame padding area (not on any node)
+    // Nodes at (100,100) and (400,100). Frame starts at ~(70, 70).
+    // Click at (75, 75) — inside frame padding, outside any node rect.
+    let click = Vec2::new(75.0, 75.0);
+    gs.handle_input(InputEvent::MouseDown {
+        screen: click, world: click,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+
+    // Both nodes should now be selected
+    assert_eq!(gs.selection.get_cloned().len(), 2, "Frame click should select all member nodes");
+
+    // Drag to move by (50, 30)
+    let drag_to = Vec2::new(125.0, 105.0);
+    gs.handle_input(InputEvent::MouseMove {
+        screen: drag_to, world: drag_to,
+        modifiers: Modifiers::default(),
+    });
+
+    gs.handle_input(InputEvent::MouseUp {
+        screen: drag_to, world: drag_to,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+
+    // Verify both nodes moved by (50, 30)
+    let new_n1 = gs.with_graph(|g| {
+        let p = g.world.get::<nodegraph_core::graph::node::NodePosition>(n1).unwrap();
+        (p.x, p.y)
+    });
+    let new_n2 = gs.with_graph(|g| {
+        let p = g.world.get::<nodegraph_core::graph::node::NodePosition>(n2).unwrap();
+        (p.x, p.y)
+    });
+
+    assert!((new_n1.0 - orig_n1.0 - 50.0).abs() < 1e-6, "N1 x should move by 50, got delta {}", new_n1.0 - orig_n1.0);
+    assert!((new_n1.1 - orig_n1.1 - 30.0).abs() < 1e-6, "N1 y should move by 30");
+    assert!((new_n2.0 - orig_n2.0 - 50.0).abs() < 1e-6, "N2 x should move by 50");
+    assert!((new_n2.1 - orig_n2.1 - 30.0).abs() < 1e-6, "N2 y should move by 30");
+}

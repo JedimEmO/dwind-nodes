@@ -111,7 +111,8 @@ pub fn copy_nodes(graph: &NodeGraph, node_ids: &[EntityId]) -> SerializedGraph {
                 }
             }
         }
-        nodes.push(SerializedNode { id: node_id.index, header, position: pos, ports });
+        let is_reroute = graph.world.get::<crate::graph::reroute::IsReroute>(node_id).is_some();
+        nodes.push(SerializedNode { id: node_id.index, header, position: pos, ports, is_reroute });
     }
     SerializedGraph { nodes, connections }
 }
@@ -126,6 +127,9 @@ pub fn paste_nodes(graph: &mut NodeGraph, data: &SerializedGraph, offset: (f64, 
         if let Some(h) = graph.world.get_mut::<NodeHeader>(node_id) {
             h.color = snode.header.color;
             h.collapsed = snode.header.collapsed;
+        }
+        if snode.is_reroute {
+            graph.world.insert(node_id, crate::graph::reroute::IsReroute);
         }
         id_map.insert(snode.id, node_id);
         new_nodes.push(node_id);
