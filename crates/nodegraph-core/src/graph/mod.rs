@@ -249,3 +249,684 @@ impl Default for NodeGraph {
         Self::new()
     }
 }
+
+// ============================================================
+// GraphEditor — manages multiple NodeGraphs for group navigation
+// ============================================================
+
+use group::SubgraphRoot;
+
+/// Marker component for Group Input/Output special nodes inside subgraphs.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum GroupIOKind {
+    Input,
+    Output,
+}
+
+pub struct GraphEditor {
+    graphs: HashMap<EntityId, NodeGraph>,
+    root_graph_id: EntityId,
+    current_graph_id: EntityId,
+    breadcrumb: Vec<EntityId>,
+    next_graph_id: u32,
+    /// subgraph_id → (parent_graph_id, group_node_id)
+    subgraph_parents: HashMap<EntityId, (EntityId, EntityId)>,
+    /// Bidirectional mapping: subgraph IO port ↔ parent group node port.
+    /// Key: IO port in subgraph, Value: corresponding port on group node in parent.
+    io_port_mapping: HashMap<EntityId, EntityId>,
+}
+
+impl GraphEditor {
+    pub fn new() -> Self {
+        let root = NodeGraph::new();
+        // Use a synthetic EntityId for the root graph
+        let root_id = EntityId { index: 0, generation: crate::store::Generation::default() };
+        let mut graphs = HashMap::new();
+        graphs.insert(root_id, root);
+
+        Self {
+            graphs,
+            root_graph_id: root_id,
+            current_graph_id: root_id,
+            breadcrumb: vec![root_id],
+            next_graph_id: 1,
+            subgraph_parents: HashMap::new(),
+            io_port_mapping: HashMap::new(),
+        }
+    }
+
+    fn alloc_graph_id(&mut self) -> EntityId {
+        let id = EntityId { index: self.next_graph_id, generation: crate::store::Generation::default() };
+        self.next_graph_id += 1;
+        id
+    }
+
+    pub fn root_graph_id(&self) -> EntityId { self.root_graph_id }
+    pub fn current_graph_id(&self) -> EntityId { self.current_graph_id }
+    pub fn breadcrumb(&self) -> &[EntityId] { &self.breadcrumb }
+
+    pub fn current_graph(&self) -> &NodeGraph {
+        self.graphs.get(&self.current_graph_id).expect("current graph must exist")
+    }
+
+    pub fn current_graph_mut(&mut self) -> &mut NodeGraph {
+        self.graphs.get_mut(&self.current_graph_id).expect("current graph must exist")
+    }
+
+    pub fn graph(&self, id: EntityId) -> Option<&NodeGraph> {
+        self.graphs.get(&id)
+    }
+
+    pub fn graph_mut(&mut self, id: EntityId) -> Option<&mut NodeGraph> {
+        self.graphs.get_mut(&id)
+    }
+
+    /// Navigate into a group node's subgraph.
+    pub fn enter_group(&mut self, group_node_id: EntityId) -> bool {
+        let current = self.graphs.get(&self.current_graph_id).expect("current graph");
+        if let Some(sub) = current.world.get::<SubgraphRoot>(group_node_id) {
+            let subgraph_id = sub.0;
+            if self.graphs.contains_key(&subgraph_id) {
+                self.current_graph_id = subgraph_id;
+                self.breadcrumb.push(subgraph_id);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Navigate back to a specific graph in the breadcrumb.
+    pub fn navigate_to(&mut self, graph_id: EntityId) -> bool {
+        if let Some(pos) = self.breadcrumb.iter().position(|&id| id == graph_id) {
+            self.breadcrumb.truncate(pos + 1);
+            self.current_graph_id = graph_id;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Navigate up one level.
+    pub fn exit_group(&mut self) -> bool {
+        if self.breadcrumb.len() > 1 {
+            self.breadcrumb.pop();
+            self.current_graph_id = *self.breadcrumb.last().unwrap();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Group selected nodes from the current graph into a new subgraph.
+    /// Returns (group_node_id, subgraph_id) on success.
+    pub fn group_nodes(&mut self, node_ids: &[EntityId]) -> Option<(EntityId, EntityId)> {
+        if node_ids.is_empty() { return None; }
+
+        let subgraph_id = self.alloc_graph_id();
+        let mut subgraph = NodeGraph::new();
+
+        let current_id = self.current_graph_id;
+        let parent = self.graphs.get_mut(&current_id)?;
+
+        // Collect node data from parent
+        let mut node_set: std::collections::HashSet<EntityId> = node_ids.iter().copied().collect();
+
+        // Identify cut connections: connections where one end is in the selection and the other isn't
+        let mut external_inputs: Vec<(EntityId, EntityId, SocketType)> = Vec::new(); // (ext_src_port, int_tgt_port, type)
+        let mut external_outputs: Vec<(EntityId, EntityId, SocketType)> = Vec::new(); // (int_src_port, ext_tgt_port, type)
+        let mut internal_connections: std::collections::HashSet<(EntityId, EntityId)> = std::collections::HashSet::new();
+
+        for &nid in node_ids {
+            for &pid in parent.node_ports(nid) {
+                for &conn_id in parent.port_connections(pid) {
+                    if let Some(ep) = parent.world.get::<ConnectionEndpoints>(conn_id) {
+                        let src_owner = parent.world.get::<PortOwner>(ep.source_port).map(|o| o.0);
+                        let tgt_owner = parent.world.get::<PortOwner>(ep.target_port).map(|o| o.0);
+
+                        let src_in = src_owner.map(|o| node_set.contains(&o)).unwrap_or(false);
+                        let tgt_in = tgt_owner.map(|o| node_set.contains(&o)).unwrap_or(false);
+
+                        if src_in && tgt_in {
+                            internal_connections.insert((ep.source_port, ep.target_port));
+                        } else if src_in && !tgt_in {
+                            // Output goes external
+                            let st = parent.world.get::<PortSocketType>(ep.source_port).map(|s| s.0).unwrap_or(SocketType::Float);
+                            external_outputs.push((ep.source_port, ep.target_port, st));
+                        } else if !src_in && tgt_in {
+                            // Input comes from external
+                            let st = parent.world.get::<PortSocketType>(ep.target_port).map(|s| s.0).unwrap_or(SocketType::Float);
+                            external_inputs.push((ep.source_port, ep.target_port, st));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Create group node in parent with ports matching cut connections
+        let group_node = parent.add_node("Group", (0.0, 0.0));
+        // Position: average of selected nodes
+        let mut avg_x = 0.0;
+        let mut avg_y = 0.0;
+        let mut count = 0.0;
+        for &nid in node_ids {
+            if let Some(pos) = parent.world.get::<NodePosition>(nid) {
+                avg_x += pos.x;
+                avg_y += pos.y;
+                count += 1.0;
+            }
+        }
+        if count > 0.0 {
+            if let Some(pos) = parent.world.get_mut::<NodePosition>(group_node) {
+                pos.x = avg_x / count;
+                pos.y = avg_y / count;
+            }
+        }
+
+        // Mark as group node with subgraph reference
+        parent.world.insert(group_node, SubgraphRoot(subgraph_id));
+
+        // Create group input/output ports on the group node
+        let mut group_input_ports = Vec::new();
+        for (_, _, st) in &external_inputs {
+            let gp = parent.add_port(group_node, PortDirection::Input, *st, "In");
+            group_input_ports.push(gp);
+        }
+        let mut group_output_ports = Vec::new();
+        for (_, _, st) in &external_outputs {
+            let gp = parent.add_port(group_node, PortDirection::Output, *st, "Out");
+            group_output_ports.push(gp);
+        }
+
+        // Reconnect external connections to group node ports
+        for (i, (ext_src, _, _)) in external_inputs.iter().enumerate() {
+            let _ = parent.connect(*ext_src, group_input_ports[i]);
+        }
+        for (i, (_, ext_tgt, _)) in external_outputs.iter().enumerate() {
+            let _ = parent.connect(group_output_ports[i], *ext_tgt);
+        }
+
+        // Create Group IO nodes inside subgraph
+        let group_input_node = subgraph.add_node("Group Input", (0.0, 0.0));
+        subgraph.world.insert(group_input_node, GroupIOKind::Input);
+        let group_output_node = subgraph.add_node("Group Output", (400.0, 0.0));
+        subgraph.world.insert(group_output_node, GroupIOKind::Output);
+
+        // Add ports to IO nodes matching the group node's ports
+        let mut sub_input_ports = Vec::new();
+        for (_, _, st) in &external_inputs {
+            let sp = subgraph.add_port(group_input_node, PortDirection::Output, *st, "In");
+            sub_input_ports.push(sp);
+        }
+        let mut sub_output_ports = Vec::new();
+        for (_, _, st) in &external_outputs {
+            let sp = subgraph.add_port(group_output_node, PortDirection::Input, *st, "Out");
+            sub_output_ports.push(sp);
+        }
+
+        // Snapshot selected nodes from parent and recreate them in subgraph
+        let mut old_to_new_port: HashMap<EntityId, EntityId> = HashMap::new();
+
+        for &nid in node_ids {
+            let header = parent.world.get::<NodeHeader>(nid).cloned()
+                .unwrap_or(NodeHeader { title: "?".into(), color: [100,100,100], collapsed: false });
+            let pos = parent.world.get::<NodePosition>(nid).cloned()
+                .unwrap_or(NodePosition { x: 0.0, y: 0.0 });
+
+            let new_nid = subgraph.add_node(&header.title, (pos.x, pos.y));
+            if let Some(h) = subgraph.world.get_mut::<NodeHeader>(new_nid) {
+                h.color = header.color;
+                h.collapsed = header.collapsed;
+            }
+
+            // Recreate ports
+            for &old_pid in parent.node_ports(nid) {
+                let dir = parent.world.get::<PortDirection>(old_pid).copied()
+                    .unwrap_or(PortDirection::Input);
+                let st = parent.world.get::<PortSocketType>(old_pid).map(|s| s.0)
+                    .unwrap_or(SocketType::Float);
+                let label = parent.world.get::<PortLabel>(old_pid).map(|l| l.0.clone())
+                    .unwrap_or_default();
+                let new_pid = subgraph.add_port(new_nid, dir, st, &label);
+                old_to_new_port.insert(old_pid, new_pid);
+            }
+        }
+
+        // Recreate internal connections in subgraph
+        for (old_src, old_tgt) in &internal_connections {
+            if let (Some(&new_src), Some(&new_tgt)) = (old_to_new_port.get(old_src), old_to_new_port.get(old_tgt)) {
+                let _ = subgraph.connect(new_src, new_tgt);
+            }
+        }
+
+        // Connect IO nodes to the recreated internal ports
+        for (i, (_, int_tgt_port, _)) in external_inputs.iter().enumerate() {
+            if let Some(&new_tgt) = old_to_new_port.get(int_tgt_port) {
+                let _ = subgraph.connect(sub_input_ports[i], new_tgt);
+            }
+        }
+        for (i, (int_src_port, _, _)) in external_outputs.iter().enumerate() {
+            if let Some(&new_src) = old_to_new_port.get(int_src_port) {
+                let _ = subgraph.connect(new_src, sub_output_ports[i]);
+            }
+        }
+
+        // Remove original nodes from parent
+        for &nid in node_ids {
+            parent.remove_node(nid);
+        }
+
+        self.graphs.insert(subgraph_id, subgraph);
+
+        // Cache parent/child mappings
+        self.subgraph_parents.insert(subgraph_id, (current_id, group_node));
+        for (i, &sub_port) in sub_input_ports.iter().enumerate() {
+            self.io_port_mapping.insert(sub_port, group_input_ports[i]);
+        }
+        for (i, &sub_port) in sub_output_ports.iter().enumerate() {
+            self.io_port_mapping.insert(sub_port, group_output_ports[i]);
+        }
+
+        Some((group_node, subgraph_id))
+    }
+
+    /// Ungroup: dissolve a group node, moving subgraph nodes back into the parent.
+    pub fn ungroup(&mut self, group_node_id: EntityId) -> bool {
+        let current_id = self.current_graph_id;
+        let subgraph_id = {
+            let parent = self.graphs.get(&current_id).expect("current graph");
+            match parent.world.get::<SubgraphRoot>(group_node_id) {
+                Some(s) => s.0,
+                None => return false,
+            }
+        };
+
+        // Snapshot the group node's external connections before removing it
+        let mut external_inputs: Vec<(EntityId, EntityId)> = Vec::new(); // (ext_src, group_input_port)
+        let mut external_outputs: Vec<(EntityId, EntityId)> = Vec::new(); // (group_output_port, ext_tgt)
+        {
+            let parent = self.graphs.get(&current_id).expect("current graph");
+            for &pid in parent.node_ports(group_node_id) {
+                let dir = parent.world.get::<PortDirection>(pid).copied();
+                for &conn_id in parent.port_connections(pid) {
+                    if let Some(ep) = parent.world.get::<ConnectionEndpoints>(conn_id) {
+                        match dir {
+                            Some(PortDirection::Input) => external_inputs.push((ep.source_port, pid)),
+                            Some(PortDirection::Output) => external_outputs.push((pid, ep.target_port)),
+                            None => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        // Snapshot subgraph nodes (excluding IO nodes) and their connections
+        let subgraph = match self.graphs.get(&subgraph_id) { Some(g) => g, None => return false };
+
+        let mut nodes_to_move: Vec<(NodeHeader, NodePosition, Vec<(PortDirection, SocketType, String, EntityId)>)> = Vec::new();
+        let mut sub_connections: Vec<(EntityId, EntityId)> = Vec::new();
+
+        for (nid, header) in subgraph.world.query::<NodeHeader>() {
+            // Skip IO nodes
+            if subgraph.world.get::<GroupIOKind>(nid).is_some() { continue; }
+            let pos = subgraph.world.get::<NodePosition>(nid).cloned().unwrap_or(NodePosition { x: 0.0, y: 0.0 });
+            let mut ports = Vec::new();
+            for &pid in subgraph.node_ports(nid) {
+                let dir = subgraph.world.get::<PortDirection>(pid).copied().unwrap_or(PortDirection::Input);
+                let st = subgraph.world.get::<PortSocketType>(pid).map(|s| s.0).unwrap_or(SocketType::Float);
+                let label = subgraph.world.get::<PortLabel>(pid).map(|l| l.0.clone()).unwrap_or_default();
+                ports.push((dir, st, label, pid));
+            }
+            nodes_to_move.push((header.clone(), pos, ports));
+        }
+
+        // Collect internal connections (between non-IO nodes)
+        for (conn_id, ep) in subgraph.world.query::<ConnectionEndpoints>() {
+            sub_connections.push((ep.source_port, ep.target_port));
+        }
+
+        // Find IO port → internal port connections (for reconnecting externals)
+        let mut io_to_internal: HashMap<EntityId, EntityId> = HashMap::new(); // io_port → internal_port
+        for (conn_id, ep) in subgraph.world.query::<ConnectionEndpoints>() {
+            let src_owner = subgraph.world.get::<PortOwner>(ep.source_port).map(|o| o.0);
+            let tgt_owner = subgraph.world.get::<PortOwner>(ep.target_port).map(|o| o.0);
+            let src_is_io = src_owner.and_then(|o| subgraph.world.get::<GroupIOKind>(o)).is_some();
+            let tgt_is_io = tgt_owner.and_then(|o| subgraph.world.get::<GroupIOKind>(o)).is_some();
+            if src_is_io && !tgt_is_io {
+                io_to_internal.insert(ep.source_port, ep.target_port);
+            }
+            if tgt_is_io && !src_is_io {
+                io_to_internal.insert(ep.target_port, ep.source_port);
+            }
+        }
+
+        // Remove group node from parent (severs external connections)
+        let parent = self.graphs.get_mut(&current_id).expect("current graph");
+        parent.remove_node(group_node_id);
+
+        // Recreate nodes in parent
+        let mut old_to_new: HashMap<EntityId, EntityId> = HashMap::new();
+        for (header, pos, ports) in &nodes_to_move {
+            let new_nid = parent.add_node(&header.title, (pos.x, pos.y));
+            if let Some(h) = parent.world.get_mut::<NodeHeader>(new_nid) {
+                h.color = header.color;
+                h.collapsed = header.collapsed;
+            }
+            for (dir, st, label, old_pid) in ports {
+                let new_pid = parent.add_port(new_nid, *dir, *st, label);
+                old_to_new.insert(*old_pid, new_pid);
+            }
+        }
+
+        // Recreate internal connections
+        for (old_src, old_tgt) in &sub_connections {
+            if let (Some(&new_src), Some(&new_tgt)) = (old_to_new.get(old_src), old_to_new.get(old_tgt)) {
+                let _ = parent.connect(new_src, new_tgt);
+            }
+        }
+
+        // Reconnect externals: IO port → mapped to group port → mapped to internal port → new port
+        for (ext_src, group_in_port) in &external_inputs {
+            // group_in_port is on the (now removed) group node
+            // Find the IO port that corresponds to this group port
+            if let Some(&io_port) = self.io_port_mapping.iter()
+                .find(|(_, &gp)| gp == *group_in_port)
+                .map(|(ip, _)| ip)
+            {
+                if let Some(&internal_old) = io_to_internal.get(&io_port) {
+                    if let Some(&new_tgt) = old_to_new.get(&internal_old) {
+                        let _ = parent.connect(*ext_src, new_tgt);
+                    }
+                }
+            }
+        }
+        for (group_out_port, ext_tgt) in &external_outputs {
+            if let Some(&io_port) = self.io_port_mapping.iter()
+                .find(|(_, &gp)| gp == *group_out_port)
+                .map(|(ip, _)| ip)
+            {
+                if let Some(&internal_old) = io_to_internal.get(&io_port) {
+                    if let Some(&new_src) = old_to_new.get(&internal_old) {
+                        let _ = parent.connect(new_src, *ext_tgt);
+                    }
+                }
+            }
+        }
+
+        // Clean up caches
+        self.subgraph_parents.remove(&subgraph_id);
+        self.io_port_mapping.retain(|sub_port, _| {
+            // Remove mappings for ports that were in this subgraph
+            !nodes_to_move.iter().any(|(_, _, ports)| ports.iter().any(|(_, _, _, pid)| pid == sub_port))
+        });
+
+        // Remove the subgraph
+        self.graphs.remove(&subgraph_id);
+
+        true
+    }
+
+    /// Add a port to a Group Input or Group Output node.
+    /// Also adds the corresponding port on the parent graph's group node.
+    /// Returns the new port's EntityId in the subgraph, or None on failure.
+    pub fn add_group_io_port(&mut self, io_node_id: EntityId, socket_type: SocketType, label: &str) -> Option<EntityId> {
+        let current_id = self.current_graph_id;
+
+        // Can't add IO ports at root level
+        if current_id == self.root_graph_id { return None; }
+
+        // Determine if it's an input or output IO node
+        let io_kind = {
+            let sub = self.graphs.get(&current_id)?;
+            sub.world.get::<GroupIOKind>(io_node_id)?.clone()
+        };
+
+        // Find the parent graph and group node that owns this subgraph
+        let (parent_id, group_node_id) = self.find_parent_group(current_id)?;
+
+        // Add port on the IO node inside the subgraph
+        let sub_port = {
+            let sub = self.graphs.get_mut(&current_id)?;
+            match io_kind {
+                GroupIOKind::Input => {
+                    // Group Input node has Output ports (data flows from input into subgraph)
+                    sub.add_port(io_node_id, PortDirection::Output, socket_type, label)
+                }
+                GroupIOKind::Output => {
+                    // Group Output node has Input ports (data flows from subgraph to output)
+                    sub.add_port(io_node_id, PortDirection::Input, socket_type, label)
+                }
+            }
+        };
+
+        // Add corresponding port on the group node in the parent graph
+        let parent_port = {
+            let parent = self.graphs.get_mut(&parent_id)?;
+            match io_kind {
+                GroupIOKind::Input => {
+                    parent.add_port(group_node_id, PortDirection::Input, socket_type, label)
+                }
+                GroupIOKind::Output => {
+                    parent.add_port(group_node_id, PortDirection::Output, socket_type, label)
+                }
+            }
+        };
+
+        // Store the mapping
+        self.io_port_mapping.insert(sub_port, parent_port);
+
+        Some(sub_port)
+    }
+
+    /// After a connection is made to a Group IO port, adapt its type to match
+    /// the connected port and update the corresponding parent group node port.
+    pub fn adapt_group_io_port(&mut self, io_port_id: EntityId, new_type: SocketType) {
+        let current_id = self.current_graph_id;
+        if current_id == self.root_graph_id { return; }
+
+        // Update the port type in the subgraph
+        if let Some(sub) = self.graphs.get_mut(&current_id) {
+            sub.world.insert(io_port_id, PortSocketType(new_type));
+        }
+
+        // Find the corresponding parent port via the explicit mapping (O(1), no index guessing)
+        let parent_port = match self.io_port_mapping.get(&io_port_id) {
+            Some(&p) => p,
+            None => return, // not a mapped IO port
+        };
+
+        let (parent_id, _) = match self.find_parent_group(current_id) {
+            Some(v) => v,
+            None => return,
+        };
+
+        if let Some(parent) = self.graphs.get_mut(&parent_id) {
+            parent.world.insert(parent_port, PortSocketType(new_type));
+        }
+    }
+
+    /// Find which parent graph and group node own a given subgraph. O(1) via cache.
+    fn find_parent_group(&self, subgraph_id: EntityId) -> Option<(EntityId, EntityId)> {
+        self.subgraph_parents.get(&subgraph_id).copied()
+    }
+
+    /// Get a label for a graph (for breadcrumb display). O(1) via cache.
+    pub fn graph_label(&self, graph_id: EntityId) -> String {
+        if graph_id == self.root_graph_id {
+            return "Root".to_string();
+        }
+        if let Some(&(parent_id, group_node_id)) = self.subgraph_parents.get(&graph_id) {
+            if let Some(parent) = self.graphs.get(&parent_id) {
+                return parent.world.get::<NodeHeader>(group_node_id)
+                    .map(|h| h.title.clone())
+                    .unwrap_or_else(|| "Group".to_string());
+            }
+        }
+        "Group".to_string()
+    }
+}
+
+impl Default for GraphEditor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod graph_editor_tests {
+    use super::*;
+    use crate::types::socket_type::SocketType;
+
+    fn build_chain(ge: &mut GraphEditor) -> (EntityId, EntityId, EntityId) {
+        let g = ge.current_graph_mut();
+        let n1 = g.add_node("A", (0.0, 0.0));
+        let n1_out = g.add_port(n1, PortDirection::Output, SocketType::Float, "Out");
+        let n2 = g.add_node("B", (200.0, 0.0));
+        let n2_in = g.add_port(n2, PortDirection::Input, SocketType::Float, "In");
+        let n2_out = g.add_port(n2, PortDirection::Output, SocketType::Float, "Out");
+        let n3 = g.add_node("C", (400.0, 0.0));
+        let n3_in = g.add_port(n3, PortDirection::Input, SocketType::Float, "In");
+        g.connect(n1_out, n2_in).unwrap();
+        g.connect(n2_out, n3_in).unwrap();
+        (n1, n2, n3)
+    }
+
+    #[test]
+    fn new_graph_editor_has_root() {
+        let ge = GraphEditor::new();
+        assert_eq!(ge.current_graph_id(), ge.root_graph_id());
+        assert_eq!(ge.breadcrumb().len(), 1);
+        assert_eq!(ge.current_graph().node_count(), 0);
+    }
+
+    #[test]
+    fn group_middle_node() {
+        let mut ge = GraphEditor::new();
+        let (n1, n2, n3) = build_chain(&mut ge);
+
+        // Group just n2 (the middle node)
+        let result = ge.group_nodes(&[n2]);
+        assert!(result.is_some());
+        let (group_node, subgraph_id) = result.unwrap();
+
+        // Parent should have: n1, n3, group_node (3 nodes)
+        let parent = ge.current_graph();
+        assert_eq!(parent.node_count(), 3);
+
+        // Group node should have SubgraphRoot
+        assert!(parent.world.get::<SubgraphRoot>(group_node).is_some());
+
+        // Subgraph should have: Group Input + Group Output + the moved node B (3 nodes)
+        let sub = ge.graph(subgraph_id).unwrap();
+        assert_eq!(sub.node_count(), 3, "Subgraph should have IO nodes + moved node B");
+
+        // Subgraph should have internal connections:
+        // Group Input → B's input, B's output → Group Output
+        assert_eq!(sub.connection_count(), 2, "Subgraph should have IO→B and B→IO connections");
+    }
+
+    #[test]
+    fn enter_and_exit_group() {
+        let mut ge = GraphEditor::new();
+        let (_n1, n2, _n3) = build_chain(&mut ge);
+
+        let (group_node, subgraph_id) = ge.group_nodes(&[n2]).unwrap();
+
+        // Enter group
+        assert!(ge.enter_group(group_node));
+        assert_eq!(ge.current_graph_id(), subgraph_id);
+        assert_eq!(ge.breadcrumb().len(), 2);
+
+        // Exit group
+        assert!(ge.exit_group());
+        assert_eq!(ge.current_graph_id(), ge.root_graph_id());
+        assert_eq!(ge.breadcrumb().len(), 1);
+    }
+
+    #[test]
+    fn navigate_to_root() {
+        let mut ge = GraphEditor::new();
+        let (_n1, n2, _n3) = build_chain(&mut ge);
+        let root = ge.root_graph_id();
+
+        let (group_node, _) = ge.group_nodes(&[n2]).unwrap();
+        ge.enter_group(group_node);
+
+        assert!(ge.navigate_to(root));
+        assert_eq!(ge.current_graph_id(), root);
+        assert_eq!(ge.breadcrumb().len(), 1);
+    }
+
+    #[test]
+    fn ungroup() {
+        let mut ge = GraphEditor::new();
+        let (_n1, n2, _n3) = build_chain(&mut ge);
+
+        let (group_node, _) = ge.group_nodes(&[n2]).unwrap();
+        assert_eq!(ge.current_graph().node_count(), 3);
+
+        assert!(ge.ungroup(group_node));
+        // Group node dissolved, B restored: A, B, C all in parent
+        assert_eq!(ge.current_graph().node_count(), 3);
+        // Connections should be restored too
+        assert_eq!(ge.current_graph().connection_count(), 2);
+    }
+
+    #[test]
+    fn graph_label() {
+        let mut ge = GraphEditor::new();
+        let root = ge.root_graph_id();
+        assert_eq!(ge.graph_label(root), "Root");
+
+        let (_n1, n2, _n3) = build_chain(&mut ge);
+        let (_, subgraph_id) = ge.group_nodes(&[n2]).unwrap();
+        assert_eq!(ge.graph_label(subgraph_id), "Group");
+    }
+
+    #[test]
+    fn add_group_io_port() {
+        let mut ge = GraphEditor::new();
+        let (_n1, n2, _n3) = build_chain(&mut ge);
+        let (group_node, subgraph_id) = ge.group_nodes(&[n2]).unwrap();
+
+        // Enter the group
+        ge.enter_group(group_node);
+
+        // Find the Group Input node
+        let sub = ge.current_graph();
+        let input_node = sub.world.query::<GroupIOKind>()
+            .find(|(_, k)| *k == &GroupIOKind::Input)
+            .map(|(id, _)| id).unwrap();
+
+        // Count ports before
+        let ports_before = sub.node_ports(input_node).len();
+
+        // Add a port
+        drop(sub);
+        let result = ge.add_group_io_port(input_node, SocketType::Color, "Custom");
+        assert!(result.is_some());
+
+        // Subgraph IO node should have one more port
+        let sub = ge.current_graph();
+        assert_eq!(sub.node_ports(input_node).len(), ports_before + 1);
+
+        // Exit and check the group node in parent also got the port
+        ge.exit_group();
+        let parent = ge.current_graph();
+        let group_ports = parent.node_ports(group_node);
+        // Group node should have: original input + output ports + the new input
+        assert!(group_ports.len() > 2, "Group node should have gained a port");
+    }
+
+    #[test]
+    fn enter_nonexistent_group_fails() {
+        let mut ge = GraphEditor::new();
+        let fake = EntityId { index: 999, generation: crate::store::Generation::default() };
+        assert!(!ge.enter_group(fake));
+    }
+
+    #[test]
+    fn exit_at_root_fails() {
+        let mut ge = GraphEditor::new();
+        assert!(!ge.exit_group());
+    }
+}

@@ -86,6 +86,9 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                     "m" | "M" if !ctrl => { gs.toggle_mute_selected(); true }
                     "h" | "H" if !ctrl => { gs.toggle_collapse_selected(); true }
                     "a" | "A" if !ctrl && !shift => { gs.select_all(); true }
+                    "g" | "G" if !ctrl && !shift => { gs.group_selected(); true }
+                    "g" | "G" if shift && !ctrl => { gs.ungroup_selected(); true }
+                    "+" | "=" => { gs.add_group_io_port(); true }
                     "a" | "A" if shift && !ctrl => {
                         // Open search menu at viewport center (world coords)
                         let (px, py) = gs.pan.get();
@@ -147,6 +150,35 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
 
         // Search menu (HTML, screen space, above SVG)
         .child(render_search_menu(&gs))
+
+        // Breadcrumb navigation
+        .child(html!("div", {
+            .style("position", "absolute")
+            .style("top", "8px")
+            .style("left", "8px")
+            .style("z-index", "50")
+            .style("display", "flex")
+            .style("gap", "4px")
+            .style("align-items", "center")
+            .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
+            .style("font-size", "12px")
+
+            .children_signal_vec(
+                gs.breadcrumb.signal_vec_cloned().map(clone!(gs => move |(graph_id, label)| {
+                    html!("span", {
+                        .style("color", "#aaa")
+                        .style("cursor", "pointer")
+                        .style("padding", "4px 8px")
+                        .style("background", "rgba(30,30,48,0.8)")
+                        .style("border-radius", "4px")
+                        .text(&format!("{} ›", label))
+                        .event(clone!(gs => move |_: events::Click| {
+                            gs.navigate_to_graph(graph_id);
+                        }))
+                    })
+                }))
+            )
+        }))
 
         // Box select overlay in screen space (HTML div, outside SVG)
         .child(html!("div", {

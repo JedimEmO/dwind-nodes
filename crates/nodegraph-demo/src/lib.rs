@@ -104,7 +104,8 @@ pub async fn main() {
 
     // Connect: Math Add Result -> Color Mix Factor
     {
-        let graph = gs.graph.borrow();
+        let editor = gs.editor.borrow();
+        let graph = editor.current_graph();
         let math_ports = graph.node_ports(math_add).to_vec();
         let mix_ports = graph.node_ports(color_mix).to_vec();
         let math_out = math_ports.iter().find(|&&p| {
@@ -113,7 +114,7 @@ pub async fn main() {
         let mix_fac = mix_ports.iter().filter(|&&p| {
             graph.world.get::<PortDirection>(p) == Some(&PortDirection::Input)
         }).nth(2).copied(); // Factor is the 3rd input
-        drop(graph);
+        drop(editor);
         if let (Some(src), Some(tgt)) = (math_out, mix_fac) {
             gs.connect_ports(src, tgt);
         }
@@ -121,7 +122,8 @@ pub async fn main() {
 
     // Connect: Noise Color -> Principled Base Color
     {
-        let graph = gs.graph.borrow();
+        let editor = gs.editor.borrow();
+        let graph = editor.current_graph();
         let noise_ports = graph.node_ports(noise).to_vec();
         let shader_ports = graph.node_ports(shader).to_vec();
         let noise_color = noise_ports.iter().filter(|&&p| {
@@ -130,7 +132,7 @@ pub async fn main() {
         let shader_base = shader_ports.iter().filter(|&&p| {
             graph.world.get::<PortDirection>(p) == Some(&PortDirection::Input)
         }).nth(0).copied();
-        drop(graph);
+        drop(editor);
         if let (Some(src), Some(tgt)) = (noise_color, shader_base) {
             gs.connect_ports(src, tgt);
         }
@@ -138,7 +140,8 @@ pub async fn main() {
 
     // Connect: Principled BSDF -> Material Output Surface
     {
-        let graph = gs.graph.borrow();
+        let editor = gs.editor.borrow();
+        let graph = editor.current_graph();
         let shader_ports = graph.node_ports(shader).to_vec();
         let out_ports = graph.node_ports(output_node).to_vec();
         let bsdf = shader_ports.iter().find(|&&p| {
@@ -147,7 +150,7 @@ pub async fn main() {
         let surface = out_ports.iter().find(|&&p| {
             graph.world.get::<PortDirection>(p) == Some(&PortDirection::Input)
         }).copied();
-        drop(graph);
+        drop(editor);
         if let (Some(src), Some(tgt)) = (bsdf, surface) {
             gs.connect_ports(src, tgt);
         }

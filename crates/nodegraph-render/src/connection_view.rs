@@ -26,7 +26,8 @@ fn port_offset(graph: &nodegraph_core::graph::NodeGraph, port_id: EntityId) -> O
 }
 
 pub fn render_connection(conn_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
-    let graph = gs.graph.borrow();
+    let editor = gs.editor.borrow();
+    let graph = editor.current_graph();
     let ep = match graph.world.get::<ConnectionEndpoints>(conn_id) {
         Some(ep) => ep.clone(),
         None => return svg!("g", {}),
@@ -42,7 +43,7 @@ pub fn render_connection(conn_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     let src_color = src_type.map(|t| t.default_color()).unwrap_or([170, 170, 170]);
     let tgt_color = tgt_type.map(|t| t.default_color()).unwrap_or([170, 170, 170]);
     let is_conversion = match (src_type, tgt_type) { (Some(s), Some(t)) => s != t, _ => false };
-    drop(graph);
+    drop(editor);
 
     let src_pos = gs.get_node_position_signal(src_owner).unwrap_or_else(|| Mutable::new((0.0, 0.0)));
     let tgt_pos = gs.get_node_position_signal(tgt_owner).unwrap_or_else(|| Mutable::new((0.0, 0.0)));

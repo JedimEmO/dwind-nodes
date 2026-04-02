@@ -21,7 +21,8 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
         }));
     let selection = gs.selection.clone();
 
-    let graph = gs.graph.borrow();
+    let editor = gs.editor.borrow();
+    let graph = editor.current_graph();
     let ports = graph.node_ports(node_id).to_vec();
     let mut input_ports = Vec::new();
     let mut output_ports = Vec::new();
@@ -41,7 +42,9 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     let header = graph.world.get::<NodeHeader>(node_id).cloned()
         .unwrap_or(NodeHeader { title: "?".to_string(), color: [100, 100, 100], collapsed: false });
     let is_muted = graph.world.get::<MuteState>(node_id).map(|m| m.0).unwrap_or(false);
-    drop(graph);
+    let is_group = graph.world.get::<nodegraph_core::graph::group::SubgraphRoot>(node_id).is_some();
+    let is_group_io = graph.world.get::<nodegraph_core::graph::GroupIOKind>(node_id).is_some();
+    drop(editor);
 
     let num_rows = input_ports.len().max(output_ports.len());
     let total_height = HEADER_HEIGHT + num_rows as f64 * PORT_HEIGHT;
@@ -52,13 +55,24 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
         .attr_signal("transform", pos_signal.signal().map(|(x, y)| format!("translate({}, {})", x, y)))
         .attr("opacity", if is_muted { "0.4" } else { "1" })
 
-        // Node body background
+        // Double-click to enter group
+        .apply(|b| if is_group {
+            b.event(clone!(gs, node_id => move |_: events::DoubleClick| {
+                gs.enter_group(node_id);
+            }))
+        } else {
+            b
+        })
+
+        // Node body background — groups get a distinct border
         .child(svg!("rect", {
             .attr("width", &format!("{}", NODE_MIN_WIDTH))
             .attr("height", &format!("{}", total_height))
             .attr("rx", "6")
-            .attr("fill", "#2d2d3d")
-            .attr("stroke", "none")
+            .attr("fill", if is_group { "#2d3d2d" } else { "#2d2d3d" })
+            .attr("stroke", if is_group { "#4a7a4a" } else { "none" })
+            .attr("stroke-width", if is_group { "1.5" } else { "0" })
+            .attr("stroke-dasharray", if is_group { "4,2" } else { "" })
         }))
 
         // Selection highlight
@@ -153,6 +167,44 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
             let cy = HEADER_HEIGHT + (i as f64 + 0.5) * PORT_HEIGHT;
             render_port(pid, st, PortDirection::Output, NODE_MIN_WIDTH, cy, cr, cg, cb, gs)
         }).collect::<Vec<_>>())
+
+        // "Add port" button for Group IO nodes
+        .apply(|b| if is_group_io {
+            let button_y = total_height + 4.0;
+            b.child(svg!("g", {
+                .attr("cursor", "pointer")
+                .event(clone!(gs, node_id => move |e: events::Click| {
+                    e.stop_propagation();
+                    gs.select_single(node_id);
+                    gs.add_group_io_port();
+                }))
+
+                // Button background
+                .child(svg!("rect", {
+                    .attr("x", &format!("{}", NODE_MIN_WIDTH / 2.0 - 30.0))
+                    .attr("y", &format!("{}", button_y))
+                    .attr("width", "60")
+                    .attr("height", "18")
+                    .attr("rx", "9")
+                    .attr("fill", "#3a3a5e")
+                    .attr("stroke", "#555")
+                    .attr("stroke-width", "1")
+                }))
+
+                // "+" label
+                .child(svg!("text", {
+                    .attr("x", &format!("{}", NODE_MIN_WIDTH / 2.0))
+                    .attr("y", &format!("{}", button_y + 13.0))
+                    .attr("text-anchor", "middle")
+                    .attr("fill", "#aaa")
+                    .attr("font-size", "12")
+                    .attr("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
+                    .text("+ port")
+                }))
+            }))
+        } else {
+            b
+        })
     })
 }
 
