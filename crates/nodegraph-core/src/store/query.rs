@@ -1,0 +1,72 @@
+use super::component::ComponentStore;
+use super::entity::EntityId;
+use super::World;
+
+pub struct Query1<'w, T: 'static> {
+    store: Option<&'w ComponentStore<T>>,
+    pub(super) world: &'w World,
+    index: usize,
+    len: usize,
+}
+
+impl<'w, T: 'static> Query1<'w, T> {
+    pub fn new(world: &'w World) -> Self {
+        let store = world.get_store::<T>();
+        let len = store.map(|s| s.len()).unwrap_or(0);
+        Self {
+            store,
+            world,
+            index: 0,
+            len,
+        }
+    }
+}
+
+impl<'w, T: 'static> Iterator for Query1<'w, T> {
+    type Item = (EntityId, &'w T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let store = self.store?;
+        while self.index < self.len {
+            let idx = self.index;
+            self.index += 1;
+            if let Some((gen, data)) = store.get_by_index(idx) {
+                let id = EntityId {
+                    index: idx as u32,
+                    generation: *gen,
+                };
+                if self.world.is_alive(id) {
+                    return Some((id, data));
+                }
+            }
+        }
+        None
+    }
+}
+
+pub struct Query2<'w, A: 'static, B: 'static> {
+    inner: Query1<'w, A>,
+    _phantom: std::marker::PhantomData<B>,
+}
+
+impl<'w, A: 'static, B: 'static> Query2<'w, A, B> {
+    pub fn new(world: &'w World) -> Self {
+        Self {
+            inner: Query1::new(world),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<'w, A: 'static, B: 'static> Iterator for Query2<'w, A, B> {
+    type Item = (EntityId, &'w A, &'w B);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let (id, a) = self.inner.next()?;
+            if let Some(b) = self.inner.world.get::<B>(id) {
+                return Some((id, a, b));
+            }
+        }
+    }
+}
