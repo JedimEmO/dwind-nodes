@@ -1,11 +1,12 @@
 use super::entity::{EntityId, Generation};
 
-pub struct ComponentStore<T> {
+#[derive(Clone)]
+pub struct ComponentStore<T: Clone> {
     data: Vec<Option<T>>,
     generations: Vec<Generation>,
 }
 
-impl<T> ComponentStore<T> {
+impl<T: Clone> ComponentStore<T> {
     pub fn new() -> Self {
         Self {
             data: Vec::new(),
@@ -64,7 +65,7 @@ impl<T> ComponentStore<T> {
     }
 }
 
-impl<T> Default for ComponentStore<T> {
+impl<T: Clone> Default for ComponentStore<T> {
     fn default() -> Self {
         Self::new()
     }

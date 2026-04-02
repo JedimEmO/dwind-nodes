@@ -2,14 +2,14 @@ use super::component::ComponentStore;
 use super::entity::EntityId;
 use super::World;
 
-pub struct Query1<'w, T: 'static> {
+pub struct Query1<'w, T: Clone + 'static> {
     store: Option<&'w ComponentStore<T>>,
     pub(super) world: &'w World,
     index: usize,
     len: usize,
 }
 
-impl<'w, T: 'static> Query1<'w, T> {
+impl<'w, T: Clone + 'static> Query1<'w, T> {
     pub fn new(world: &'w World) -> Self {
         let store = world.get_store::<T>();
         let len = store.map(|s| s.len()).unwrap_or(0);
@@ -22,7 +22,7 @@ impl<'w, T: 'static> Query1<'w, T> {
     }
 }
 
-impl<'w, T: 'static> Iterator for Query1<'w, T> {
+impl<'w, T: Clone + 'static> Iterator for Query1<'w, T> {
     type Item = (EntityId, &'w T);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -44,12 +44,12 @@ impl<'w, T: 'static> Iterator for Query1<'w, T> {
     }
 }
 
-pub struct Query2<'w, A: 'static, B: 'static> {
+pub struct Query2<'w, A: Clone + 'static, B: Clone + 'static> {
     inner: Query1<'w, A>,
     _phantom: std::marker::PhantomData<B>,
 }
 
-impl<'w, A: 'static, B: 'static> Query2<'w, A, B> {
+impl<'w, A: Clone + 'static, B: Clone + 'static> Query2<'w, A, B> {
     pub fn new(world: &'w World) -> Self {
         Self {
             inner: Query1::new(world),
@@ -58,7 +58,7 @@ impl<'w, A: 'static, B: 'static> Query2<'w, A, B> {
     }
 }
 
-impl<'w, A: 'static, B: 'static> Iterator for Query2<'w, A, B> {
+impl<'w, A: Clone + 'static, B: Clone + 'static> Iterator for Query2<'w, A, B> {
     type Item = (EntityId, &'w A, &'w B);
 
     fn next(&mut self) -> Option<Self::Item> {

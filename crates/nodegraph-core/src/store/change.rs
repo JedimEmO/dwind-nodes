@@ -8,6 +8,7 @@ pub struct ChangeRecord {
     pub component_type: TypeId,
 }
 
+#[derive(Clone)]
 pub struct ChangeTracker {
     changes: HashSet<ChangeRecord>,
 }

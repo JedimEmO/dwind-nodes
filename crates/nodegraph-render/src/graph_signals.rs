@@ -6,11 +6,8 @@ use wasm_bindgen::JsCast;
 use futures_signals::signal::Mutable;
 use futures_signals::signal_vec::MutableVec;
 
-use nodegraph_core::commands::{
-    CommandHistory, MoveNodesCommand,
-    RemoveNodeCommand, DuplicateNodesCommand, MuteNodeCommand, CollapseNodeCommand,
-};
-use nodegraph_core::graph::{GraphEditor, NodeGraph};
+use nodegraph_core::commands::UndoHistory;
+use nodegraph_core::graph::{GraphEditor, NodeGraph, GroupIOKind};
 use nodegraph_core::graph::node::{NodeHeader, NodePosition, MuteState};
 use nodegraph_core::graph::port::PortDirection;
 use nodegraph_core::graph::connection::ConnectionEndpoints;
@@ -35,12 +32,11 @@ pub fn is_exact_type_match(a: SocketType, b: SocketType) -> bool { a == b }
 
 pub struct GraphSignals {
     pub editor: Rc<RefCell<GraphEditor>>,
-    pub history: Rc<RefCell<CommandHistory>>,
+    pub history: Rc<RefCell<UndoHistory>>,
     pub controller: Rc<RefCell<InteractionController>>,
 
     pub node_list: MutableVec<EntityId>,
     pub connection_list: MutableVec<EntityId>,
-
     pub node_positions: Rc<RefCell<HashMap<EntityId, Mutable<(f64, f64)>>>>,
     pub node_headers: Rc<RefCell<HashMap<EntityId, Mutable<NodeHeader>>>>,
 
@@ -58,9 +54,7 @@ pub struct GraphSignals {
     pub search_menu: Mutable<Option<(f64, f64)>>,
     pub pending_connection: Mutable<Option<(EntityId, SocketType, bool)>>,
 
-    /// Current graph ID — drives which graph's nodes/connections are rendered
     pub current_graph_id: Mutable<EntityId>,
-    /// Breadcrumb path for navigation
     pub breadcrumb: MutableVec<(EntityId, String)>,
 }
 
@@ -70,7 +64,7 @@ impl GraphSignals {
         let root_id = editor.root_graph_id();
         Rc::new(Self {
             editor: Rc::new(RefCell::new(editor)),
-            history: Rc::new(RefCell::new(CommandHistory::new())),
+            history: Rc::new(RefCell::new(UndoHistory::new())),
             controller: Rc::new(RefCell::new(InteractionController::new())),
             node_list: MutableVec::new(),
             connection_list: MutableVec::new(),
@@ -92,40 +86,47 @@ impl GraphSignals {
         })
     }
 
-    /// Backwards-compatible accessor: borrows editor and returns the Ref.
-    /// Callers can then call `.current_graph()` on the returned guard.
-    /// This allows `gs.graph().current_graph().world.get::<...>()`
-    pub fn graph(&self) -> std::cell::Ref<'_, GraphEditor> {
-        self.editor.borrow()
-    }
-
-    pub fn graph_mut(&self) -> std::cell::RefMut<'_, GraphEditor> {
-        self.editor.borrow_mut()
-    }
+    // ============================================================
+    // Convenience accessors
+    // ============================================================
 
     pub fn with_graph<R>(&self, f: impl FnOnce(&NodeGraph) -> R) -> R {
         let editor = self.editor.borrow();
         f(editor.current_graph())
     }
 
-    /// Borrow the current graph mutably (convenience).
     pub fn with_graph_mut<R>(&self, f: impl FnOnce(&mut NodeGraph) -> R) -> R {
         let mut editor = self.editor.borrow_mut();
         f(editor.current_graph_mut())
     }
 
+    pub fn node_count(&self) -> usize { self.with_graph(|g| g.node_count()) }
+    pub fn connection_count(&self) -> usize { self.with_graph(|g| g.connection_count()) }
+
+    pub fn select_single(&self, node_id: EntityId) {
+        self.controller.borrow_mut().selection.clear();
+        self.controller.borrow_mut().selection.select(node_id);
+        self.selection.set(vec![node_id]);
+    }
+
+    /// Snapshot the current editor state for undo. Call BEFORE mutating.
+    fn save_undo(&self) {
+        let editor = self.editor.borrow();
+        self.history.borrow_mut().save(&editor);
+    }
+
+    // ============================================================
+    // Node/connection operations (all undoable via snapshot)
+    // ============================================================
+
     pub fn add_node(&self, title: &str, position: (f64, f64), ports: Vec<(PortDirection, SocketType, String)>) -> EntityId {
         let node_id = self.with_graph_mut(|graph| {
             let nid = graph.add_node(title, position);
-            for (dir, st, label) in &ports {
-                graph.add_port(nid, *dir, *st, label);
-            }
+            for (dir, st, label) in &ports { graph.add_port(nid, *dir, *st, label); }
             nid
         });
-        let header = self.with_graph(|graph| {
-            graph.world.get::<NodeHeader>(node_id).cloned()
-                .unwrap_or(NodeHeader { title: title.to_string(), color: [100, 100, 100], collapsed: false })
-        });
+        let header = self.with_graph(|g| g.world.get::<NodeHeader>(node_id).cloned()
+            .unwrap_or(NodeHeader { title: title.to_string(), color: [100,100,100], collapsed: false }));
         self.node_positions.borrow_mut().insert(node_id, Mutable::new(position));
         self.node_headers.borrow_mut().insert(node_id, Mutable::new(header));
         self.node_list.lock_mut().push_cloned(node_id);
@@ -133,51 +134,24 @@ impl GraphSignals {
     }
 
     pub fn spawn_from_registry(&self, type_id: &str, position: (f64, f64)) {
-        let def = match self.registry.borrow().get(type_id) {
-            Some(d) => d.clone(),
-            None => return,
-        };
+        let def = match self.registry.borrow().get(type_id) { Some(d) => d.clone(), None => return };
         let mut all_ports: Vec<(PortDirection, SocketType, String)> = Vec::new();
         for p in &def.input_ports { all_ports.push((p.direction, p.socket_type, p.label.clone())); }
         for p in &def.output_ports { all_ports.push((p.direction, p.socket_type, p.label.clone())); }
 
-        // Use AddNodeCommand for undo support
-        use nodegraph_core::commands::AddNodeCommand;
-        let cmd = AddNodeCommand::new(&def.display_name, position, all_ports.clone());
-        {
-            let mut editor = self.editor.borrow_mut();
-            let mut history = self.history.borrow_mut();
-            history.execute(Box::new(cmd), editor.current_graph_mut());
-        }
-        // Find the newly added node
-        let node_id = self.with_graph(|g| {
-            g.world.query::<NodeHeader>()
-                .filter(|(_, h)| h.title == def.display_name)
-                .map(|(id, _)| id)
-                .last()
-        });
-        let node_id = match node_id {
-            Some(id) => id,
-            None => { self.pending_connection.set(None); self.search_menu.set(None); return; }
-        };
-        // Sync signals for the new node
-        let header = self.with_graph(|g| g.world.get::<NodeHeader>(node_id).cloned()
-            .unwrap_or(NodeHeader { title: def.display_name.clone(), color: [100,100,100], collapsed: false }));
-        self.node_positions.borrow_mut().insert(node_id, Mutable::new(position));
-        self.node_headers.borrow_mut().insert(node_id, Mutable::new(header));
-        self.node_list.lock_mut().push_cloned(node_id);
+        self.save_undo();
+        let node_id = self.add_node(&def.display_name, position, all_ports);
 
         if let Some((src_port, src_type, from_output)) = self.pending_connection.get() {
             let new_ports = self.with_graph(|g| g.node_ports(node_id).to_vec());
             for &pid in &new_ports {
                 let info = self.with_graph(|g| {
-                    let dir = g.world.get::<PortDirection>(pid).copied();
-                    let st = g.world.get::<nodegraph_core::graph::port::PortSocketType>(pid).map(|s| s.0);
-                    (dir, st)
+                    (g.world.get::<PortDirection>(pid).copied(),
+                     g.world.get::<nodegraph_core::graph::port::PortSocketType>(pid).map(|s| s.0))
                 });
                 if let (Some(dir), Some(st)) = info {
                     if is_valid_connection_target(from_output, src_type, dir, st) {
-                        self.connect_ports(src_port, pid);
+                        self.connect_ports_no_undo(src_port, pid);
                         break;
                     }
                 }
@@ -187,63 +161,17 @@ impl GraphSignals {
         self.search_menu.set(None);
     }
 
-    pub fn open_search_menu(&self, world_x: f64, world_y: f64) {
-        self.pending_connection.set(None);
-        self.search_menu.set(Some((world_x, world_y)));
-        wasm_bindgen_futures::spawn_local(async {
-            let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
-            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-            if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-                if let Some(el) = doc.query_selector("[data-search-menu] input").ok().flatten() {
-                    if let Ok(html_el) = el.dyn_into::<web_sys::HtmlElement>() {
-                        let _ = html_el.focus();
-                    }
-                }
-            }
-        });
-    }
-
-    pub fn close_search_menu(&self) {
-        self.search_menu.set(None);
-        self.pending_connection.set(None);
-    }
-
     pub fn connect_ports(&self, source: EntityId, target: EntityId) -> Option<EntityId> {
-        use nodegraph_core::commands::ConnectCommand;
-        let conns_before: std::collections::HashSet<EntityId> = self.with_graph(|g| {
-            g.world.query::<ConnectionEndpoints>().map(|(id, _)| id).collect()
-        });
-        {
-            let mut editor = self.editor.borrow_mut();
-            let mut history = self.history.borrow_mut();
-            history.execute(Box::new(ConnectCommand::new(source, target)), editor.current_graph_mut());
-        }
-        // Find the new connection by diffing
-        let conn_id = self.with_graph(|g| {
-            g.world.query::<ConnectionEndpoints>()
-                .map(|(id, _)| id)
-                .find(|id| !conns_before.contains(id))
-        })?;
+        self.save_undo();
+        self.connect_ports_no_undo(source, target)
+    }
+
+    fn connect_ports_no_undo(&self, source: EntityId, target: EntityId) -> Option<EntityId> {
+        let conn_id = self.with_graph_mut(|g| g.connect(source, target).ok())?;
         self.connection_list.lock_mut().push_cloned(conn_id);
-        self.reconcile_connections(); // remove any replaced connection
+        self.reconcile_connections();
         self.adapt_io_ports_after_connect(source, target);
         Some(conn_id)
-    }
-
-    /// After a connection, adapt Group IO port types to match what they're connected to.
-    fn adapt_io_ports_after_connect(&self, port_a: EntityId, port_b: EntityId) {
-        let (a_type, b_type, a_is_io, b_is_io) = self.with_graph(|g| {
-            let at = g.world.get::<nodegraph_core::graph::port::PortSocketType>(port_a).map(|s| s.0);
-            let bt = g.world.get::<nodegraph_core::graph::port::PortSocketType>(port_b).map(|s| s.0);
-            let a_io = g.world.get::<nodegraph_core::graph::port::PortOwner>(port_a)
-                .and_then(|o| g.world.get::<nodegraph_core::graph::GroupIOKind>(o.0)).is_some();
-            let b_io = g.world.get::<nodegraph_core::graph::port::PortOwner>(port_b)
-                .and_then(|o| g.world.get::<nodegraph_core::graph::GroupIOKind>(o.0)).is_some();
-            (at, bt, a_io, b_io)
-        });
-        let mut editor = self.editor.borrow_mut();
-        if a_is_io { if let Some(bt) = b_type { editor.adapt_group_io_port(port_a, bt); } }
-        if b_is_io { if let Some(at) = a_type { editor.adapt_group_io_port(port_b, at); } }
     }
 
     pub fn port_world_pos(&self, port_id: EntityId) -> Option<Vec2> {
@@ -267,17 +195,63 @@ impl GraphSignals {
         best.map(|(id, _)| id)
     }
 
+    fn adapt_io_ports_after_connect(&self, port_a: EntityId, port_b: EntityId) {
+        let (a_type, b_type, a_is_io, b_is_io) = self.with_graph(|g| {
+            let at = g.world.get::<nodegraph_core::graph::port::PortSocketType>(port_a).map(|s| s.0);
+            let bt = g.world.get::<nodegraph_core::graph::port::PortSocketType>(port_b).map(|s| s.0);
+            let a_io = g.world.get::<nodegraph_core::graph::port::PortOwner>(port_a)
+                .and_then(|o| g.world.get::<GroupIOKind>(o.0)).is_some();
+            let b_io = g.world.get::<nodegraph_core::graph::port::PortOwner>(port_b)
+                .and_then(|o| g.world.get::<GroupIOKind>(o.0)).is_some();
+            (at, bt, a_io, b_io)
+        });
+        let mut editor = self.editor.borrow_mut();
+        if a_is_io { if let Some(bt) = b_type { editor.adapt_group_io_port(port_a, bt); } }
+        if b_is_io { if let Some(at) = a_type { editor.adapt_group_io_port(port_b, at); } }
+    }
+
+    // ============================================================
+    // Search menu
+    // ============================================================
+
+    pub fn open_search_menu(&self, world_x: f64, world_y: f64) {
+        self.pending_connection.set(None);
+        self.search_menu.set(Some((world_x, world_y)));
+        wasm_bindgen_futures::spawn_local(async {
+            let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
+            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+                if let Some(el) = doc.query_selector("[data-search-menu] input").ok().flatten() {
+                    if let Ok(html_el) = el.dyn_into::<web_sys::HtmlElement>() { let _ = html_el.focus(); }
+                }
+            }
+        });
+    }
+
+    pub fn close_search_menu(&self) {
+        self.search_menu.set(None);
+        self.pending_connection.set(None);
+    }
+
+    // ============================================================
+    // Connecting (drag-to-connect)
+    // ============================================================
+
     pub fn start_connecting(self: &Rc<Self>, port_id: EntityId, _screen: Vec2, world: Vec2) {
         let (from_output, socket_type) = self.with_graph(|g| {
-            let from_output = g.world.get::<PortDirection>(port_id).map(|d| *d == PortDirection::Output).unwrap_or(false);
+            let fo = g.world.get::<PortDirection>(port_id).map(|d| *d == PortDirection::Output).unwrap_or(false);
             let st = g.world.get::<nodegraph_core::graph::port::PortSocketType>(port_id).map(|s| s.0).unwrap_or(SocketType::Float);
-            (from_output, st)
+            (fo, st)
         });
         self.connecting_from.set(Some((port_id, socket_type, from_output)));
         self.controller.borrow_mut().state = InteractionState::ConnectingPort {
             source_port: port_id, from_output, cursor_world: world,
         };
     }
+
+    // ============================================================
+    // Input handling
+    // ============================================================
 
     pub fn handle_input(self: &Rc<Self>, event: InputEvent) {
         let is_connecting = matches!(self.controller.borrow().state, InteractionState::ConnectingPort { .. });
@@ -289,6 +263,7 @@ impl GraphSignals {
                     _ => unreachable!(),
                 };
                 if let Some(target_port) = self.drop_target_port.get() {
+                    self.save_undo();
                     let result = self.with_graph_mut(|g| g.connect(source_port, target_port));
                     if let Ok(conn_id) = result {
                         self.connection_list.lock_mut().push_cloned(conn_id);
@@ -297,10 +272,7 @@ impl GraphSignals {
                     }
                     self.connecting_from.set(None);
                 } else {
-                    let world = match &event {
-                        InputEvent::MouseUp { world, .. } => *world,
-                        _ => Vec2::new(0.0, 0.0),
-                    };
+                    let world = match &event { InputEvent::MouseUp { world, .. } => *world, _ => Vec2::new(0.0, 0.0) };
                     if let Some(cf) = self.connecting_from.get() {
                         self.pending_connection.set(Some(cf));
                         self.search_menu.set(Some((world.x, world.y)));
@@ -331,20 +303,8 @@ impl GraphSignals {
             }
         }
 
-        let pre_drag_positions: Option<Vec<(EntityId, f64, f64)>> = {
-            let ctrl = self.controller.borrow();
-            match &ctrl.state {
-                InteractionState::DraggingNodes { node_ids, .. } => {
-                    Some(self.with_graph(|g| {
-                        node_ids.iter().filter_map(|&id| {
-                            g.world.get::<NodePosition>(id).map(|p| (id, p.x, p.y))
-                        }).collect()
-                    }))
-                }
-                _ => None,
-            }
-        };
-        let was_dragging = matches!(self.controller.borrow().state, InteractionState::DraggingNodes { .. });
+        // Track drag start for undo
+        let was_idle = matches!(self.controller.borrow().state, InteractionState::Idle);
 
         let effects = {
             let mut editor = self.editor.borrow_mut();
@@ -352,29 +312,11 @@ impl GraphSignals {
             ctrl.handle_event(event, editor.current_graph_mut())
         };
 
-        let is_now_idle = matches!(self.controller.borrow().state, InteractionState::Idle);
+        let is_now_dragging = matches!(self.controller.borrow().state, InteractionState::DraggingNodes { .. });
 
-        if was_dragging && is_now_idle {
-            if let Some(pre_positions) = pre_drag_positions {
-                let done = self.with_graph(|g| {
-                    for &(id, pre_x, pre_y) in &pre_positions {
-                        if let Some(pos) = g.world.get::<NodePosition>(id) {
-                            let dx = pos.x - pre_x;
-                            let dy = pos.y - pre_y;
-                            if dx.abs() > 0.1 || dy.abs() > 0.1 {
-                                return Some((dx, dy));
-                            }
-                        }
-                    }
-                    None
-                });
-                if let Some((dx, dy)) = done {
-                    let node_ids = pre_positions.iter().map(|&(id, _, _)| id).collect();
-                    self.history.borrow_mut().push_already_executed(Box::new(MoveNodesCommand {
-                        node_ids, delta_x: dx, delta_y: dy,
-                    }));
-                }
-            }
+        // Save undo at the START of a drag (transition from Idle to DraggingNodes)
+        if was_idle && is_now_dragging {
+            self.save_undo();
         }
 
         let mut connections_may_have_changed = false;
@@ -411,7 +353,6 @@ impl GraphSignals {
                 _ => { if !self.cut_line_points.get_cloned().is_empty() { self.cut_line_points.set(Vec::new()); } }
             }
         }
-
         if connections_may_have_changed { self.reconcile_connections(); }
     }
 
@@ -427,23 +368,21 @@ impl GraphSignals {
     }
 
     // ============================================================
-    // Group operations
+    // Group operations (all undoable via snapshot)
     // ============================================================
 
     pub fn group_selected(self: &Rc<Self>) {
         let selected = self.selection.get_cloned();
         if selected.is_empty() { return; }
-        let result = self.editor.borrow_mut().group_nodes(&selected);
-        if result.is_some() {
-            self.full_sync();
-        }
+        self.save_undo();
+        self.editor.borrow_mut().group_nodes(&selected);
+        self.full_sync();
     }
 
     pub fn ungroup_selected(self: &Rc<Self>) {
         let selected = self.selection.get_cloned();
-        for &nid in &selected {
-            self.editor.borrow_mut().ungroup(nid);
-        }
+        self.save_undo();
+        for &nid in &selected { self.editor.borrow_mut().ungroup(nid); }
         self.full_sync();
     }
 
@@ -464,11 +403,9 @@ impl GraphSignals {
         if editor.navigate_to(graph_id) {
             drop(editor);
             self.current_graph_id.set(graph_id);
-            // Rebuild breadcrumb from editor state
             let editor = self.editor.borrow();
             let bc: Vec<(EntityId, String)> = editor.breadcrumb().iter()
-                .map(|&id| (id, editor.graph_label(id)))
-                .collect();
+                .map(|&id| (id, editor.graph_label(id))).collect();
             drop(editor);
             let mut lock = self.breadcrumb.lock_mut();
             lock.clear();
@@ -486,74 +423,65 @@ impl GraphSignals {
         }
     }
 
-    /// Select a single node (syncs both controller and signal).
-    pub fn select_single(&self, node_id: EntityId) {
-        self.controller.borrow_mut().selection.clear();
-        self.controller.borrow_mut().selection.select(node_id);
-        self.selection.set(vec![node_id]);
-    }
-
-    /// Add a port to a selected Group IO node (+ key).
     pub fn add_group_io_port(self: &Rc<Self>) {
         let selected = self.selection.get_cloned();
         if selected.len() != 1 { return; }
         let nid = selected[0];
-
-        // Check if it's a Group IO node
-        let is_io = self.with_graph(|g| g.world.get::<nodegraph_core::graph::GroupIOKind>(nid).is_some());
+        let is_io = self.with_graph(|g| g.world.get::<GroupIOKind>(nid).is_some());
         if !is_io { return; }
-
+        self.save_undo();
         self.editor.borrow_mut().add_group_io_port(nid, SocketType::Any, "");
         self.full_sync();
     }
 
     // ============================================================
-    // Keyboard commands
+    // Keyboard commands (all undoable via snapshot)
     // ============================================================
 
     pub fn delete_selected(self: &Rc<Self>) {
         let selected = self.selection.get_cloned();
         if selected.is_empty() { return; }
-        for &nid in &selected {
-            let mut editor = self.editor.borrow_mut();
-            let mut h = self.history.borrow_mut();
-            h.execute(Box::new(RemoveNodeCommand::new(nid)), editor.current_graph_mut());
-        }
+        self.save_undo();
+        for &nid in &selected { self.with_graph_mut(|g| g.remove_node(nid)); }
         self.full_sync();
     }
 
     pub fn undo(self: &Rc<Self>) {
-        { let mut editor = self.editor.borrow_mut(); self.history.borrow_mut().undo(editor.current_graph_mut()); }
+        { let mut editor = self.editor.borrow_mut(); self.history.borrow_mut().undo(&mut *editor); }
         self.full_sync();
     }
 
     pub fn redo(self: &Rc<Self>) {
-        { let mut editor = self.editor.borrow_mut(); self.history.borrow_mut().redo(editor.current_graph_mut()); }
+        { let mut editor = self.editor.borrow_mut(); self.history.borrow_mut().redo(&mut *editor); }
         self.full_sync();
     }
 
     pub fn duplicate_selected(self: &Rc<Self>) {
         let selected = self.selection.get_cloned();
         if selected.is_empty() { return; }
-        { let mut editor = self.editor.borrow_mut();
-          self.history.borrow_mut().execute(Box::new(DuplicateNodesCommand::new(selected, (30.0, 30.0))), editor.current_graph_mut()); }
+        self.save_undo();
+        // Simple duplicate: copy + paste with offset
+        let clipboard = nodegraph_core::commands::copy_nodes(
+            self.editor.borrow().current_graph(), &selected);
+        nodegraph_core::commands::paste_nodes(
+            self.editor.borrow_mut().current_graph_mut(), &clipboard, (30.0, 30.0));
         self.full_sync();
     }
 
     pub fn toggle_mute_selected(self: &Rc<Self>) {
+        self.save_undo();
         for &nid in &self.selection.get_cloned() {
             let muted = self.with_graph(|g| g.world.get::<MuteState>(nid).map(|m| m.0).unwrap_or(false));
-            let mut editor = self.editor.borrow_mut();
-            self.history.borrow_mut().execute(Box::new(MuteNodeCommand { node_id: nid, muted: !muted }), editor.current_graph_mut());
+            self.with_graph_mut(|g| g.world.insert(nid, MuteState(!muted)));
         }
         self.sync_all_headers();
     }
 
     pub fn toggle_collapse_selected(self: &Rc<Self>) {
+        self.save_undo();
         for &nid in &self.selection.get_cloned() {
             let c = self.with_graph(|g| g.world.get::<NodeHeader>(nid).map(|h| h.collapsed).unwrap_or(false));
-            let mut editor = self.editor.borrow_mut();
-            self.history.borrow_mut().execute(Box::new(CollapseNodeCommand { node_id: nid, collapsed: !c }), editor.current_graph_mut());
+            self.with_graph_mut(|g| { if let Some(h) = g.world.get_mut::<NodeHeader>(nid) { h.collapsed = !c; } });
         }
         self.sync_all_headers();
     }
@@ -572,9 +500,7 @@ impl GraphSignals {
 
     fn full_sync(&self) {
         let nodes: Vec<EntityId> = self.with_graph(|g| g.world.query::<NodeHeader>().map(|(id, _)| id).collect());
-
         { let mut l = self.node_list.lock_mut(); l.clear(); for &id in &nodes { l.push_cloned(id); } }
-
         {
             let editor = self.editor.borrow();
             let graph = editor.current_graph();
@@ -588,10 +514,8 @@ impl GraphSignals {
                 if let Some(m) = headers.get(&nid) { m.set(h); } else { headers.insert(nid, Mutable::new(h)); }
             }
         }
-
         { let conns: Vec<EntityId> = self.with_graph(|g| g.world.query::<ConnectionEndpoints>().map(|(id, _)| id).collect());
           let mut l = self.connection_list.lock_mut(); l.clear(); for &id in &conns { l.push_cloned(id); } }
-
         self.sync_selection();
     }
 
@@ -613,16 +537,6 @@ impl GraphSignals {
 
     fn sync_selection(&self) {
         self.selection.set(self.controller.borrow().selection.selected.clone());
-    }
-
-    /// Convenience: borrow the current graph's node_count.
-    pub fn node_count(&self) -> usize {
-        self.with_graph(|g| g.node_count())
-    }
-
-    /// Convenience: borrow the current graph's connection_count.
-    pub fn connection_count(&self) -> usize {
-        self.with_graph(|g| g.connection_count())
     }
 
     pub fn get_node_position_signal(&self, node_id: EntityId) -> Option<Mutable<(f64, f64)>> {

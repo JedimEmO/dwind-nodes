@@ -25,6 +25,7 @@ pub struct EntityId {
     pub generation: Generation,
 }
 
+#[derive(Clone)]
 pub struct EntityAllocator {
     generations: Vec<Generation>,
     free_list: Vec<u32>,

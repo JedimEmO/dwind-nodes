@@ -26,6 +26,7 @@ pub enum ConnectionError {
     SameNode,
 }
 
+#[derive(Clone)]
 pub struct NodeGraph {
     pub world: World,
     ports_by_node: HashMap<EntityId, Vec<EntityId>>,
@@ -201,6 +202,23 @@ impl NodeGraph {
         }
     }
 
+    pub fn remove_port(&mut self, port: EntityId) {
+        // Remove all connections on this port
+        let conns: Vec<EntityId> = self.connections_by_port
+            .get(&port).cloned().unwrap_or_default();
+        for conn_id in conns {
+            self.disconnect(conn_id);
+        }
+        self.connections_by_port.remove(&port);
+        // Remove from parent node's port list
+        if let Some(owner) = self.world.get::<PortOwner>(port).map(|o| o.0) {
+            if let Some(ports) = self.ports_by_node.get_mut(&owner) {
+                ports.retain(|&p| p != port);
+            }
+        }
+        self.world.despawn(port);
+    }
+
     pub fn remove_node(&mut self, node: EntityId) {
         // Remove all connections on this node's ports
         if let Some(ports) = self.ports_by_node.get(&node).cloned() {
@@ -263,6 +281,7 @@ pub enum GroupIOKind {
     Output,
 }
 
+#[derive(Clone)]
 pub struct GraphEditor {
     graphs: HashMap<EntityId, NodeGraph>,
     root_graph_id: EntityId,
@@ -270,10 +289,10 @@ pub struct GraphEditor {
     breadcrumb: Vec<EntityId>,
     next_graph_id: u32,
     /// subgraph_id → (parent_graph_id, group_node_id)
-    subgraph_parents: HashMap<EntityId, (EntityId, EntityId)>,
+    pub subgraph_parents: HashMap<EntityId, (EntityId, EntityId)>,
     /// Bidirectional mapping: subgraph IO port ↔ parent group node port.
     /// Key: IO port in subgraph, Value: corresponding port on group node in parent.
-    io_port_mapping: HashMap<EntityId, EntityId>,
+    pub io_port_mapping: HashMap<EntityId, EntityId>,
 }
 
 impl GraphEditor {
@@ -745,7 +764,7 @@ impl GraphEditor {
     }
 
     /// Find which parent graph and group node own a given subgraph. O(1) via cache.
-    fn find_parent_group(&self, subgraph_id: EntityId) -> Option<(EntityId, EntityId)> {
+    pub fn find_parent_group(&self, subgraph_id: EntityId) -> Option<(EntityId, EntityId)> {
         self.subgraph_parents.get(&subgraph_id).copied()
     }
 

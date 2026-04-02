@@ -144,9 +144,9 @@ fn component_has() {
 // Acceptance Criterion 3: Query correctness
 // ============================================================
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 struct CompA(u32);
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 struct CompB(u32);
 
 #[test]

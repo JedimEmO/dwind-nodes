@@ -1291,3 +1291,222 @@ fn test_undo_connect() {
     gs.undo();
     assert_eq!(gs.connection_count(), 0, "After undo connect: should have 0 connections. Got {}", gs.connection_count());
 }
+
+// ============================================================
+// Undo debt: group/ungroup/add-io-port must be undoable
+// ============================================================
+
+#[wasm_bindgen_test]
+fn test_undo_ungroup() {
+    let (gs, _n1, n2, _n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    // Group B
+    gs.select_single(n2);
+    gs.group_selected();
+    assert_eq!(gs.node_count(), 3); // A, C, Group
+
+    let group_node = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id).next().unwrap()
+    });
+
+    // Ungroup
+    gs.select_single(group_node);
+    gs.ungroup_selected();
+    assert_eq!(gs.node_count(), 3); // A, B, C restored
+
+    // Undo ungroup → group should be back
+    gs.undo();
+    assert_eq!(gs.node_count(), 3, "After undo ungroup: should have A, C, Group. Got {}", gs.node_count());
+
+    // The group node should exist again with SubgraphRoot
+    let has_group = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>().count()
+    });
+    assert_eq!(has_group, 1, "After undo ungroup: group node should be back");
+}
+
+#[wasm_bindgen_test]
+fn test_undo_add_io_port() {
+    let (gs, _n1, n2, _n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    gs.select_single(n2);
+    gs.group_selected();
+
+    let group_node = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id).next().unwrap()
+    });
+
+    let group_ports_before = gs.with_graph(|g| g.node_ports(group_node).len());
+
+    // Enter group and add IO port
+    gs.enter_group(group_node);
+
+    let input_node = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::GroupIOKind>()
+            .find(|(_, k)| **k == nodegraph_core::graph::GroupIOKind::Input)
+            .map(|(id, _)| id).unwrap()
+    });
+    let io_ports_before = gs.with_graph(|g| g.node_ports(input_node).len());
+
+    gs.select_single(input_node);
+    gs.add_group_io_port();
+
+    let io_ports_after = gs.with_graph(|g| g.node_ports(input_node).len());
+    assert_eq!(io_ports_after, io_ports_before + 1, "IO port should be added");
+
+    // Undo → port should be gone
+    gs.undo();
+    let io_ports_undone = gs.with_graph(|g| g.node_ports(input_node).len());
+    assert_eq!(io_ports_undone, io_ports_before, "After undo: IO port should be removed. Got {}", io_ports_undone);
+
+    // Check parent group node also lost the port
+    let root_id = gs.editor.borrow().root_graph_id();
+    gs.navigate_to_graph(root_id);
+    let group_ports_undone = gs.with_graph(|g| g.node_ports(group_node).len());
+    assert_eq!(group_ports_undone, group_ports_before, "After undo: parent group port should be removed too. Got {}", group_ports_undone);
+}
+
+#[wasm_bindgen_test]
+fn test_undo_redo_group_cycle() {
+    let (gs, _n1, n2, _n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    assert_eq!(gs.node_count(), 3);
+    assert_eq!(gs.connection_count(), 2);
+
+    // Group B
+    gs.select_single(n2);
+    gs.group_selected();
+    assert_eq!(gs.node_count(), 3); // A, C, Group
+
+    // Undo group → back to A, B, C
+    gs.undo();
+    assert_eq!(gs.node_count(), 3, "After undo group: A, B, C");
+    assert_eq!(gs.connection_count(), 2, "After undo group: 2 connections");
+    let has_group = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>().count()
+    });
+    assert_eq!(has_group, 0, "After undo group: no group nodes");
+
+    // Redo group
+    gs.redo();
+    assert_eq!(gs.node_count(), 3, "After redo group: A, C, Group. Got {}", gs.node_count());
+
+    // Undo again
+    gs.undo();
+    assert_eq!(gs.node_count(), 3, "After 2nd undo: A, B, C. Got {}", gs.node_count());
+
+    // Redo again
+    gs.redo();
+    assert_eq!(gs.node_count(), 3, "After 2nd redo: A, C, Group. Got {}", gs.node_count());
+
+    // Undo again
+    gs.undo();
+    assert_eq!(gs.node_count(), 3, "After 3rd undo: A, B, C. Got {}", gs.node_count());
+    assert_eq!(gs.connection_count(), 2, "After 3rd undo: 2 connections. Got {}", gs.connection_count());
+}
+
+#[wasm_bindgen_test]
+fn test_group_a_group_with_another_node() {
+    // A → B → C, group B, then group (GroupB + C) together
+    let (gs, _n1, n2, _n3) = setup_three_node_chain();
+    let _tc = render_sync(&gs);
+
+    // Group B
+    gs.select_single(n2);
+    gs.group_selected();
+    assert_eq!(gs.node_count(), 3); // A, C, GroupB
+
+    // Find GroupB and C
+    let (group_b, node_c) = gs.with_graph(|g| {
+        let group = g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id).next().unwrap();
+        let c = g.world.query::<nodegraph_core::graph::node::NodeHeader>()
+            .find(|(id, h)| h.title == "C")
+            .map(|(id, _)| id).unwrap();
+        (group, c)
+    });
+
+    // Group (GroupB + C) together
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(group_b);
+    gs.controller.borrow_mut().selection.select(node_c);
+    gs.selection.set(vec![group_b, node_c]);
+    gs.group_selected();
+
+    // Should have: A, OuterGroup (2 nodes)
+    assert_eq!(gs.node_count(), 2, "After nesting: A + OuterGroup. Got {}", gs.node_count());
+
+    // Undo → back to A, C, GroupB
+    gs.undo();
+    assert_eq!(gs.node_count(), 3, "After undo nested group: A, C, GroupB. Got {}", gs.node_count());
+
+    // Undo again → back to A, B, C
+    gs.undo();
+    assert_eq!(gs.node_count(), 3, "After undo first group: A, B, C. Got {}", gs.node_count());
+    assert_eq!(gs.connection_count(), 2, "After full undo: 2 connections. Got {}", gs.connection_count());
+}
+
+#[wasm_bindgen_test]
+fn test_nested_group_undo_redo_stress() {
+    // A → B → C → D, group B+C, undo, redo, undo, group B only, undo, redo
+    let gs = GraphSignals::new();
+    let n1 = gs.add_node("A", (0.0, 0.0), vec![
+        (PortDirection::Output, SocketType::Float, "Out".to_string()),
+    ]);
+    let n2 = gs.add_node("B", (200.0, 0.0), vec![
+        (PortDirection::Input, SocketType::Float, "In".to_string()),
+        (PortDirection::Output, SocketType::Float, "Out".to_string()),
+    ]);
+    let n3 = gs.add_node("C", (400.0, 0.0), vec![
+        (PortDirection::Input, SocketType::Float, "In".to_string()),
+        (PortDirection::Output, SocketType::Float, "Out".to_string()),
+    ]);
+    let n4 = gs.add_node("D", (600.0, 0.0), vec![
+        (PortDirection::Input, SocketType::Float, "In".to_string()),
+    ]);
+    let _tc = render_sync(&gs);
+
+    // Connect A→B→C→D
+    let ports = gs.with_graph(|g| {
+        let a_out = g.node_ports(n1).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output)).copied().unwrap();
+        let b_in = g.node_ports(n2).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
+        let b_out = g.node_ports(n2).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output)).copied().unwrap();
+        let c_in = g.node_ports(n3).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
+        let c_out = g.node_ports(n3).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output)).copied().unwrap();
+        let d_in = g.node_ports(n4).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
+        (a_out, b_in, b_out, c_in, c_out, d_in)
+    });
+    gs.connect_ports(ports.0, ports.1);
+    gs.connect_ports(ports.2, ports.3);
+    gs.connect_ports(ports.4, ports.5);
+
+    assert_eq!(gs.node_count(), 4);
+    assert_eq!(gs.connection_count(), 3);
+
+    // Group B+C
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.controller.borrow_mut().selection.select(n3);
+    gs.selection.set(vec![n2, n3]);
+    gs.group_selected();
+    assert_eq!(gs.node_count(), 3, "After group B+C: A, D, Group. Got {}", gs.node_count());
+
+    // Undo
+    gs.undo();
+    assert_eq!(gs.node_count(), 4, "After undo: A, B, C, D. Got {}", gs.node_count());
+    assert_eq!(gs.connection_count(), 3, "After undo: 3 connections. Got {}", gs.connection_count());
+
+    // Redo
+    gs.redo();
+    assert_eq!(gs.node_count(), 3, "After redo: A, D, Group. Got {}", gs.node_count());
+
+    // Undo again
+    gs.undo();
+    assert_eq!(gs.node_count(), 4, "After 2nd undo: A, B, C, D. Got {}", gs.node_count());
+    assert_eq!(gs.connection_count(), 3, "After 2nd undo: 3 connections. Got {}", gs.connection_count());
+}
