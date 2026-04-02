@@ -6,14 +6,15 @@ use futures_signals::signal::SignalExt;
 use futures_signals::signal_vec::SignalVecExt;
 use futures_signals::map_ref;
 
-use crate::graph_signals::GraphSignals;
+use crate::graph_signals::{GraphSignals, ATTR_VIEWPORT_INNER};
 use crate::node_view::render_node;
-use crate::connection_view::{render_connection, render_preview_wire};
+use crate::connection_view::{render_connection, render_preview_wire, render_cut_line};
 use crate::event_bridge;
 
 pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
     let container_rect: Rc<Cell<(f64, f64)>> = Rc::new(Cell::new((0.0, 0.0)));
 
+    // Outer HTML div for sizing and event capture
     html!("div", {
         .style("width", "100%")
         .style("height", "100%")
@@ -21,21 +22,16 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
         .style("overflow", "hidden")
         .style("background", "#1a1a2e")
 
-        // Track container position for coordinate conversion
         .after_inserted(clone!(container_rect => move |el| {
             let rect = el.get_bounding_client_rect();
             container_rect.set((rect.left(), rect.top()));
         }))
 
-        // Prevent context menu
         .event_with_options(
             &EventOptions { preventable: true, ..EventOptions::default() },
-            |e: events::ContextMenu| {
-                e.prevent_default();
-            }
+            |e: events::ContextMenu| { e.prevent_default(); }
         )
 
-        // Mouse events
         .event(clone!(gs, container_rect => move |e: events::MouseDown| {
             event_bridge::on_mouse_down(&gs, e, container_rect.get());
         }))
@@ -49,62 +45,73 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
             event_bridge::on_wheel(&gs, e, container_rect.get());
         }))
 
-        // Transform container (holds nodes + SVG)
-        .child(html!("div", {
-            .style("position", "absolute")
-            .style("transform-origin", "0 0")
-            .style("left", "0")
-            .style("top", "0")
-            .style("width", "0")
-            .style("height", "0")
-            .attr("data-viewport-inner", "")
-
-            .style_signal("transform", {
-                map_ref! {
-                    let pan = gs.pan.signal(),
-                    let zoom = gs.zoom.signal() => {
-                        format!("translate({}px, {}px) scale({})", pan.0, pan.1, zoom)
-                    }
-                }
+        // Keyboard shortcuts
+        .attr("tabindex", "0")
+        .style("outline", "none")
+        .event_with_options(
+            &EventOptions { preventable: true, ..EventOptions::default() },
+            clone!(gs => move |e: events::KeyDown| {
+                let key = e.key();
+                let ctrl = e.ctrl_key();
+                let shift = e.shift_key();
+                let handled = match key.as_str() {
+                    "Delete" | "x" | "X" if !ctrl => { gs.delete_selected(); true }
+                    "z" | "Z" if ctrl && shift => { gs.redo(); true }
+                    "z" | "Z" if ctrl => { gs.undo(); true }
+                    "d" | "D" if shift => { gs.duplicate_selected(); true }
+                    "m" | "M" if !ctrl => { gs.toggle_mute_selected(); true }
+                    "h" | "H" if !ctrl => { gs.toggle_collapse_selected(); true }
+                    "a" | "A" if !ctrl && !shift => { gs.select_all(); true }
+                    _ => false,
+                };
+                if handled { e.prevent_default(); }
             })
+        )
 
-            // SVG layer for connections (behind nodes via z-index)
-            .child(html!("div", {
-                .style("position", "absolute")
-                .style("left", "0")
-                .style("top", "0")
-                .style("width", "0")
-                .style("height", "0")
-                .style("overflow", "visible")
-                .style("pointer-events", "none")
-                .style("z-index", "0")
-                .child(svg!("svg", {
-                    .attr("xmlns", "http://www.w3.org/2000/svg")
-                    .attr("width", "1")
-                    .attr("height", "1")
-                    .attr("overflow", "visible")
+        // Single SVG element containing everything
+        .child(svg!("svg", {
+            .attr("width", "100%")
+            .attr("height", "100%")
+            .attr("xmlns", "http://www.w3.org/2000/svg")
 
-                    // Connection paths
-                    .children_signal_vec(
-                        gs.connection_list.signal_vec_cloned().map(clone!(gs => move |conn_id| {
-                            render_connection(conn_id, &gs)
-                        }))
-                    )
+            // Pan/zoom transform group
+            .child(svg!("g", {
+                .attr(ATTR_VIEWPORT_INNER, "")
+                .attr_signal("transform", {
+                    map_ref! {
+                        let pan = gs.pan.signal(),
+                        let zoom = gs.zoom.signal() => {
+                            format!("translate({}, {}) scale({})", pan.0, pan.1, zoom)
+                        }
+                    }
+                })
 
-                    // Preview wire
-                    .child(render_preview_wire(&gs))
-                }))
+                // Connection layer (behind nodes)
+                .children_signal_vec(
+                    gs.connection_list.signal_vec_cloned().map(clone!(gs => move |conn_id| {
+                        render_connection(conn_id, &gs)
+                    }))
+                )
+
+                // Preview wire
+                .child(render_preview_wire(&gs))
+
+                // Cut line
+                .child(render_cut_line(&gs))
+
+                // Node layer (on top)
+                .children_signal_vec(
+                    gs.node_list.signal_vec_cloned().map(clone!(gs => move |node_id| {
+                        render_node(node_id, &gs)
+                    }))
+                )
             }))
 
-            // Node layer (above SVG)
-            .children_signal_vec(
-                gs.node_list.signal_vec_cloned().map(clone!(gs => move |node_id| {
-                    render_node(node_id, &gs)
-                }))
-            )
+            // Box select overlay (in world space, inside the transform group would scale it;
+            // keep in screen space by applying inverse transform or separate group)
         }))
 
-        // Box select overlay — world-space rect converted to screen-space
+        // Box select overlay in screen space (HTML div, outside SVG)
         .child(html!("div", {
             .style("position", "absolute")
             .style("pointer-events", "none")

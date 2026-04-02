@@ -65,6 +65,14 @@ impl CommandHistory {
         !self.redo_stack.is_empty()
     }
 
+    /// Push a command that was already executed externally onto the undo stack.
+    /// Used when the InteractionController directly mutates the graph (e.g., node drag)
+    /// and we want to record it for undo without re-executing.
+    pub fn push_already_executed(&mut self, command: Box<dyn Command>) {
+        self.undo_stack.push(command);
+        self.redo_stack.clear();
+    }
+
     pub fn undo_count(&self) -> usize {
         self.undo_stack.len()
     }
