@@ -17,14 +17,14 @@ pub fn render_search_menu(gs: &Rc<GraphSignals>) -> Dom {
         .style("z-index", "100")
         .style("width", "220px")
         .style("max-height", "300px")
-        .style("background", "#2a2a3e")
-        .style("border", "1px solid #555")
+        .style("background", gs.theme.menu_bg)
+        .style("border", &format!("1px solid {}", gs.theme.menu_border))
         .style("border-radius", "6px")
         .style("overflow", "hidden")
         .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
         .style("font-size", "12px")
-        .style("color", "#ccc")
-        .style("box-shadow", "0 4px 16px rgba(0,0,0,0.5)")
+        .style("color", gs.theme.menu_text)
+        .style("box-shadow", gs.theme.menu_shadow)
 
         .style_signal("display", gs.search_menu.signal_cloned().map(|opt| {
             if opt.is_some() { "block" } else { "none" }
@@ -60,9 +60,9 @@ pub fn render_search_menu(gs: &Rc<GraphSignals>) -> Dom {
             .style("width", "100%")
             .style("padding", "8px 10px")
             .style("border", "none")
-            .style("border-bottom", "1px solid #444")
-            .style("background", "#1e1e30")
-            .style("color", "white")
+            .style("border-bottom", &format!("1px solid {}", gs.theme.menu_input_border))
+            .style("background", gs.theme.menu_input_bg)
+            .style("color", gs.theme.menu_input_text)
             .style("font-size", "12px")
             .style("outline", "none")
             .style("box-sizing", "border-box")
@@ -155,17 +155,23 @@ pub fn render_search_menu(gs: &Rc<GraphSignals>) -> Dom {
                         html!("div", {
                             .style("padding", "6px 10px")
                             .style("cursor", "pointer")
-                            .style("background", if is_selected { "#3a3a5e" } else { "transparent" })
-                            .style("border-left", if is_selected { "3px solid #4a9eff" } else { "3px solid transparent" })
+                            .style("background", if is_selected { gs.theme.menu_selected_bg } else { "transparent" })
+                            .style("border-left", &{
+                                if is_selected {
+                                    format!("3px solid {}", gs.theme.menu_selected_border)
+                                } else {
+                                    "3px solid transparent".to_string()
+                                }
+                            })
 
                             .child(html!("div", {
                                 .style("font-weight", "bold")
-                                .style("color", "white")
+                                .style("color", gs.theme.menu_input_text)
                                 .text(&name)
                             }))
                             .child(html!("div", {
                                 .style("font-size", "9px")
-                                .style("color", "#888")
+                                .style("color", gs.theme.menu_category_text)
                                 .text(&category)
                             }))
 

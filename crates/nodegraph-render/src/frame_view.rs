@@ -33,14 +33,15 @@ pub fn render_frame(frame_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
             .attr_signal("width", bounds.signal().map(|(_, _, w, _)| format!("{}", w)))
             .attr_signal("height", bounds.signal().map(|(_, _, _, h)| format!("{}", h)))
             .attr("rx", "8")
-            .attr("fill", &format!("rgba({},{},{},0.15)", r, g, b))
-            .attr_signal("stroke", is_selected.signal().map(move |sel| {
-                if sel {
-                    format!("rgba({},{},{},0.9)", r, g, b)
-                } else {
-                    format!("rgba({},{},{},0.4)", r, g, b)
-                }
-            }))
+            .attr("fill", &format!("rgba({},{},{},{})", r, g, b, gs.theme.frame_fill_opacity))
+            .attr_signal("stroke", {
+                let sel_opacity = gs.theme.frame_selected_opacity;
+                let norm_opacity = gs.theme.frame_stroke_opacity;
+                is_selected.signal().map(move |sel| {
+                    let opacity = if sel { sel_opacity } else { norm_opacity };
+                    format!("rgba({},{},{},{})", r, g, b, opacity)
+                })
+            })
             .attr_signal("stroke-width", is_selected.signal().map(|sel| {
                 if sel { "2" } else { "1" }
             }))

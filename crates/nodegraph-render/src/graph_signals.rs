@@ -17,6 +17,8 @@ use nodegraph_core::search::NodeTypeRegistry;
 use nodegraph_core::store::EntityId;
 use nodegraph_core::types::socket_type::SocketType;
 
+use crate::theme::Theme;
+
 pub const ATTR_NODE_ID: &str = "data-node-id";
 pub const ATTR_PORT_ID: &str = "data-port-id";
 pub const ATTR_VIEWPORT_INNER: &str = "data-viewport-inner";
@@ -60,6 +62,10 @@ pub struct GraphSignals {
 
     pub current_graph_id: Mutable<EntityId>,
     pub breadcrumb: MutableVec<(EntityId, String)>,
+
+    pub theme: Rc<Theme>,
+    pub graph_bounds: Mutable<(f64, f64, f64, f64)>,
+    pub viewport_size: Mutable<(f64, f64)>,
 }
 
 impl GraphSignals {
@@ -91,6 +97,9 @@ impl GraphSignals {
             pending_connection: Mutable::new(None),
             current_graph_id: Mutable::new(root_id),
             breadcrumb: MutableVec::new_with_values(vec![(root_id, "Root".to_string())]),
+            theme: Theme::dark(),
+            graph_bounds: Mutable::new((0.0, 0.0, 800.0, 600.0)),
+            viewport_size: Mutable::new((800.0, 600.0)),
         })
     }
 
@@ -583,6 +592,7 @@ impl GraphSignals {
             let mut l = self.frame_list.lock_mut(); l.clear(); for &id in &frames { l.push_cloned(id); }
         }
         self.sync_selection();
+        self.recompute_graph_bounds();
     }
 
     fn sync_all_positions(&self) {
@@ -599,6 +609,28 @@ impl GraphSignals {
                 let rect = layout::compute_frame_rect(graph, &members.0);
                 mutable.set((rect.x, rect.y, rect.w, rect.h));
             }
+        }
+        drop(editor);
+        self.recompute_graph_bounds();
+    }
+
+    fn recompute_graph_bounds(&self) {
+        let editor = self.editor.borrow();
+        let graph = editor.current_graph();
+        let mut min_x = f64::MAX;
+        let mut min_y = f64::MAX;
+        let mut max_x = f64::MIN;
+        let mut max_y = f64::MIN;
+        for (_, pos) in graph.world.query::<NodePosition>() {
+            min_x = min_x.min(pos.x);
+            min_y = min_y.min(pos.y);
+            let num_ports = 3; // rough estimate
+            let h = layout::HEADER_HEIGHT + num_ports as f64 * layout::PORT_HEIGHT;
+            max_x = max_x.max(pos.x + layout::NODE_MIN_WIDTH);
+            max_y = max_y.max(pos.y + h);
+        }
+        if min_x < f64::MAX {
+            self.graph_bounds.set((min_x, min_y, max_x, max_y));
         }
     }
 

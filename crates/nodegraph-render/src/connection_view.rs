@@ -115,7 +115,7 @@ pub fn render_cut_line(gs: &Rc<GraphSignals>) -> Dom {
     let points = gs.cut_line_points.clone();
     svg!("polyline", {
         .attr("fill", "none")
-        .attr("stroke", "#ff4444")
+        .attr("stroke", gs.theme.cut_line)
         .attr("stroke-width", "2")
         .attr("stroke-dasharray", "4,3")
         .attr_signal("points", points.signal_cloned().map(|pts| {
@@ -134,7 +134,7 @@ pub fn render_preview_wire(gs: &Rc<GraphSignals>) -> Dom {
             opt.map(|p| p.to_svg_d()).unwrap_or_default()
         }))
         .attr("fill", "none")
-        .attr("stroke", "#4a9eff")
+        .attr("stroke", gs.theme.preview_wire)
         .attr("stroke-width", "2")
         .attr("stroke-dasharray", "6,4")
         .attr_signal("visibility", preview.signal_cloned().map(|opt| {

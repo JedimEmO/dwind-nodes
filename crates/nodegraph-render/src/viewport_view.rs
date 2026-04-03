@@ -12,6 +12,7 @@ use crate::node_view::render_node;
 use crate::connection_view::{render_connection, render_preview_wire, render_cut_line};
 use crate::frame_view::render_frame;
 use crate::search_menu::render_search_menu;
+use crate::minimap_view::render_minimap;
 use crate::event_bridge;
 
 pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
@@ -23,11 +24,12 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
         .style("height", "100%")
         .style("position", "relative")
         .style("overflow", "hidden")
-        .style("background", "#1a1a2e")
+        .style("background", gs.theme.canvas_bg)
 
-        .after_inserted(clone!(container_rect => move |el| {
+        .after_inserted(clone!(gs, container_rect => move |el| {
             let rect = el.get_bounding_client_rect();
             container_rect.set((rect.left(), rect.top()));
+            gs.viewport_size.set((rect.width(), rect.height()));
         }))
 
         .event_with_options(
@@ -156,6 +158,9 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
         // Search menu (HTML, screen space, above SVG)
         .child(render_search_menu(&gs))
 
+        // Minimap (bottom-right corner)
+        .child(render_minimap(&gs))
+
         // Breadcrumb navigation
         .child(html!("div", {
             .style("position", "absolute")
@@ -171,10 +176,10 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
             .children_signal_vec(
                 gs.breadcrumb.signal_vec_cloned().map(clone!(gs => move |(graph_id, label)| {
                     html!("span", {
-                        .style("color", "#aaa")
+                        .style("color", gs.theme.breadcrumb_text)
                         .style("cursor", "pointer")
                         .style("padding", "4px 8px")
-                        .style("background", "rgba(30,30,48,0.8)")
+                        .style("background", gs.theme.breadcrumb_bg)
                         .style("border-radius", "4px")
                         .text(&format!("{} ›", label))
                         .event(clone!(gs => move |_: events::Click| {
@@ -189,8 +194,8 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
         .child(html!("div", {
             .style("position", "absolute")
             .style("pointer-events", "none")
-            .style("border", "1px solid #4a9eff")
-            .style("background", "rgba(74, 158, 255, 0.1)")
+            .style("border", &format!("1px solid {}", gs.theme.box_select_border))
+            .style("background", gs.theme.box_select_fill)
             .style_signal("display", gs.box_select_rect.signal_cloned().map(|r| {
                 if r.is_some() { "block" } else { "none" }
             }))

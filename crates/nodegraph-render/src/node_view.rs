@@ -75,8 +75,8 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
             .attr("width", &format!("{}", NODE_MIN_WIDTH))
             .attr("height", &format!("{}", total_height))
             .attr("rx", "6")
-            .attr("fill", if is_group { "#2d3d2d" } else { "#2d2d3d" })
-            .attr("stroke", if is_group { "#4a7a4a" } else { "none" })
+            .attr("fill", if is_group { gs.theme.group_node_bg } else { gs.theme.node_bg })
+            .attr("stroke", if is_group { gs.theme.group_node_border } else { "none" })
             .attr("stroke-width", if is_group { "1.5" } else { "0" })
             .attr("stroke-dasharray", if is_group { "4,2" } else { "" })
         }))
@@ -89,8 +89,9 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
             .attr("fill", "none")
             .attr_signal("stroke", {
                 let node_id = node_id;
+                let highlight = gs.theme.selection_highlight;
                 selection.signal_cloned().map(move |sel| {
-                    if sel.contains(&node_id) { "#4a9eff" } else { "none" }
+                    if sel.contains(&node_id) { highlight } else { "none" }
                 })
             })
             .attr("stroke-width", "2")
@@ -126,7 +127,7 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                     .style("padding", "0 12px")
                     .style("display", "flex")
                     .style("align-items", "center")
-                    .style("color", "white")
+                    .style("color", gs.theme.header_text)
                     .style("font-weight", "bold")
                     .style("font-size", "11px")
                     .style("white-space", "nowrap")
@@ -148,7 +149,7 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                         .style("padding", &format!("0 {}px", PORT_RADIUS + 8.0))
                         .style("box-sizing", "border-box")
                         .style("font-size", "10px")
-                        .style("color", "#ccc")
+                        .style("color", gs.theme.port_label_text)
 
                         .child(html!("span", {
                             .text(&input_label.unwrap_or_default())
@@ -192,8 +193,8 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                     .attr("width", "60")
                     .attr("height", "18")
                     .attr("rx", "9")
-                    .attr("fill", "#3a3a5e")
-                    .attr("stroke", "#555")
+                    .attr("fill", gs.theme.io_button_bg)
+                    .attr("stroke", gs.theme.io_button_stroke)
                     .attr("stroke-width", "1")
                 }))
 
@@ -202,7 +203,7 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                     .attr("x", &format!("{}", NODE_MIN_WIDTH / 2.0))
                     .attr("y", &format!("{}", button_y + 13.0))
                     .attr("text-anchor", "middle")
-                    .attr("fill", "#aaa")
+                    .attr("fill", gs.theme.io_button_text)
                     .attr("font-size", "12")
                     .attr("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
                     .text("+ port")
@@ -247,7 +248,7 @@ fn render_port(
             .attr("cy", &format!("{}", cy))
             .attr("r", &format!("{}", PORT_RADIUS))
             .attr("fill", &format!("rgb({},{},{})", r, g, b))
-            .attr("stroke", "rgba(255,255,255,0.3)")
+            .attr("stroke", gs.theme.port_stroke)
             .attr("stroke-width", "1")
             .attr("pointer-events", "none")
 
@@ -303,8 +304,8 @@ fn render_reroute(
         // Diamond shape
         .child(svg!("polygon", {
             .attr("points", &diamond)
-            .attr("fill", "#444")
-            .attr("stroke", "#888")
+            .attr("fill", gs.theme.reroute_fill)
+            .attr("stroke", gs.theme.reroute_stroke)
             .attr("stroke-width", "1.5")
         }))
 
@@ -314,8 +315,9 @@ fn render_reroute(
             .attr("fill", "none")
             .attr_signal("stroke", {
                 let node_id = node_id;
+                let highlight = gs.theme.selection_highlight;
                 selection.signal_cloned().map(move |sel| {
-                    if sel.contains(&node_id) { "#4a9eff" } else { "none" }
+                    if sel.contains(&node_id) { highlight } else { "none" }
                 })
             })
             .attr("stroke-width", "2")
