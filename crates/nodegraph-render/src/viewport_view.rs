@@ -92,11 +92,7 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                     "g" | "G" if shift && !ctrl => { gs.ungroup_selected(); true }
                     "+" | "=" => { gs.add_group_io_port(); true }
                     "a" | "A" if shift && !ctrl => {
-                        // Open search menu at viewport center (world coords)
-                        let (px, py) = gs.pan.get();
-                        let z = gs.zoom.get();
-                        let wx = (400.0 - px) / z; // approximate center
-                        let wy = (300.0 - py) / z;
+                        let (wx, wy) = gs.cursor_world.get();
                         gs.open_search_menu(wx, wy);
                         true
                     }

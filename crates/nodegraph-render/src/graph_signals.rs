@@ -52,6 +52,7 @@ pub struct GraphSignals {
     pub preview_wire: Mutable<Option<BezierPath>>,
     pub box_select_rect: Mutable<Option<(f64, f64, f64, f64)>>,
     pub cut_line_points: Mutable<Vec<(f64, f64)>>,
+    pub cursor_world: Mutable<(f64, f64)>,
 
     pub registry: Rc<RefCell<NodeTypeRegistry>>,
     pub search_menu: Mutable<Option<(f64, f64)>>,
@@ -84,6 +85,7 @@ impl GraphSignals {
             preview_wire: Mutable::new(None),
             box_select_rect: Mutable::new(None),
             cut_line_points: Mutable::new(Vec::new()),
+            cursor_world: Mutable::new((0.0, 0.0)),
             registry: Rc::new(RefCell::new(NodeTypeRegistry::new())),
             search_menu: Mutable::new(None),
             pending_connection: Mutable::new(None),

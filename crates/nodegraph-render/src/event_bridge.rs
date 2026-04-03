@@ -49,6 +49,7 @@ pub fn on_mouse_move(gs: &Rc<GraphSignals>, e: events::MouseMove, container_rect
         (screen.x - pan_x) / zoom,
         (screen.y - pan_y) / zoom,
     );
+    gs.cursor_world.set((world.x, world.y));
     gs.handle_input(InputEvent::MouseMove {
         screen,
         world,
