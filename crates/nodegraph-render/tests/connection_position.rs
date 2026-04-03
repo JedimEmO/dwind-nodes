@@ -2069,3 +2069,80 @@ fn test_delete_selected_frame() {
     assert_eq!(gs.with_graph(|g| g.frame_count()), 1, "Frame restored after undo");
     assert_eq!(gs.node_count(), 2, "Nodes restored after undo");
 }
+
+// ── Noodle-drop search menu DOM shows only compatible nodes ──────────
+#[wasm_bindgen_test]
+async fn test_noodle_drop_search_menu_dom_filtered() {
+    let gs = GraphSignals::new();
+
+    // Register 3 types: Math Add (Float), Material Output (Shader), Reroute (Any)
+    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
+        type_id: "math_add".into(), display_name: "Math Add".into(), category: "Math".into(),
+        input_ports: vec![
+            nodegraph_core::search::PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "A".into() },
+        ],
+        output_ports: vec![
+            nodegraph_core::search::PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Float, label: "Result".into() },
+        ],
+    });
+    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
+        type_id: "material_output".into(), display_name: "Material Output".into(), category: "Output".into(),
+        input_ports: vec![
+            nodegraph_core::search::PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Shader, label: "Surface".into() },
+        ],
+        output_ports: vec![],
+    });
+    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
+        type_id: "reroute".into(), display_name: "Reroute".into(), category: "Utility".into(),
+        input_ports: vec![
+            nodegraph_core::search::PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into() },
+        ],
+        output_ports: vec![
+            nodegraph_core::search::PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into() },
+        ],
+    });
+
+    // Add a node with a Shader output so we have a real port to drag from
+    let shader_node = gs.add_node("BSDF", (0.0, 0.0), vec![
+        (PortDirection::Output, SocketType::Shader, "BSDF".to_string()),
+    ]);
+    let shader_port = gs.with_graph(|g| g.node_ports(shader_node)[0]);
+
+    // Render the full editor (including search menu)
+    let _tc = render_sync(&gs);
+
+    // Simulate noodle drag from Shader output → release on empty space
+    let port_pos = gs.port_world_pos(shader_port).unwrap();
+    gs.start_connecting(shader_port, port_pos, port_pos);
+    let empty = Vec2::new(500.0, 500.0);
+    gs.handle_input(InputEvent::MouseUp {
+        screen: empty, world: empty,
+        button: MouseButton::Left, modifiers: Modifiers::default(),
+    });
+
+    // Verify search menu is open with pending connection
+    assert!(gs.search_menu.get().is_some(), "Search menu should be open");
+    assert!(gs.pending_connection.get().is_some(), "pending_connection should be set");
+
+    // Flush microtasks so dominator signals propagate to DOM
+    let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+
+    // Query the actual rendered DOM — search menu is inside the rendered editor
+    let doc = web_sys::window().unwrap().document().unwrap();
+    let menu = doc.query_selector("[data-search-menu]").unwrap();
+    assert!(menu.is_some(), "Search menu element should exist in DOM");
+    let menu_el = menu.unwrap();
+    let text = menu_el.text_content().unwrap_or_default();
+
+    // Material Output has Shader input — should appear
+    assert!(text.contains("Material Output"),
+        "DOM should show Material Output for Shader source, got: {}", text);
+    // Reroute has Any input — should appear
+    assert!(text.contains("Reroute"),
+        "DOM should show Reroute for Shader source, got: {}", text);
+    // Math Add has Float input — should NOT appear
+    assert!(!text.contains("Math Add"),
+        "DOM should NOT show Math Add for Shader source, got: {}", text);
+}
+

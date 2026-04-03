@@ -131,9 +131,13 @@ pub fn render_search_menu(gs: &Rc<GraphSignals>) -> Dom {
             .style("max-height", "260px")
             .style("overflow-y", "auto")
 
-            .child_signal(search_text.signal_cloned().map(clone!(gs, selected_index => move |query| {
+            .child_signal(map_ref! {
+                let query = search_text.signal_cloned(),
+                let pending = gs.pending_connection.signal() => {
+                    (query.clone(), *pending)
+                }
+            }.map(clone!(gs, selected_index => move |(query, pending)| {
                 let reg = gs.registry.borrow();
-                let pending = gs.pending_connection.get();
                 let results: Vec<_> = if let Some((_, src_type, from_output)) = pending {
                     reg.search_compatible(&query, src_type, from_output)
                 } else {

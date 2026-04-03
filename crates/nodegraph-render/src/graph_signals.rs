@@ -289,7 +289,18 @@ impl GraphSignals {
                     self.connecting_from.set(None);
                 } else {
                     let world = match &event { InputEvent::MouseUp { world, .. } => *world, _ => Vec2::new(0.0, 0.0) };
-                    if let Some(cf) = self.connecting_from.get() {
+                    // Use connecting_from if set (from start_connecting), otherwise derive from controller state
+                    let cf = self.connecting_from.get().or_else(|| {
+                        let (from_output, _) = match &self.controller.borrow().state {
+                            InteractionState::ConnectingPort { from_output, .. } => (*from_output, source_port),
+                            _ => return None,
+                        };
+                        let st = self.with_graph(|g| {
+                            g.world.get::<nodegraph_core::graph::port::PortSocketType>(source_port).map(|s| s.0)
+                        }).unwrap_or(SocketType::Float);
+                        Some((source_port, st, from_output))
+                    });
+                    if let Some(cf) = cf {
                         self.pending_connection.set(Some(cf));
                         self.search_menu.set(Some((world.x, world.y)));
                     }
