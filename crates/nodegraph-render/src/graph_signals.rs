@@ -61,6 +61,7 @@ pub struct GraphSignals {
     pub pending_connection: Mutable<Option<(EntityId, SocketType, bool)>>,
 
     pub current_graph_id: Mutable<EntityId>,
+    last_synced_graph: std::cell::Cell<Option<EntityId>>,
     pub breadcrumb: MutableVec<(EntityId, String)>,
 
     pub theme: Rc<Theme>,
@@ -97,6 +98,7 @@ impl GraphSignals {
             pending_connection: Mutable::new(None),
             current_graph_id: Mutable::new(root_id),
             breadcrumb: MutableVec::new_with_values(vec![(root_id, "Root".to_string())]),
+            last_synced_graph: std::cell::Cell::new(Some(root_id)),
             theme: Theme::dark(),
             graph_bounds: Mutable::new((0.0, 0.0, 800.0, 600.0)),
             viewport_size: Mutable::new((800.0, 600.0)),
@@ -151,6 +153,17 @@ impl GraphSignals {
     }
 
     pub fn spawn_from_registry(&self, type_id: &str, position: (f64, f64)) {
+        // Group IO nodes bypass the registry — they require parent graph context
+        if type_id == "group_input" || type_id == "group_output" {
+            let kind = if type_id == "group_input" { GroupIOKind::Input } else { GroupIOKind::Output };
+            self.save_undo();
+            self.create_group_io_node(kind, position);
+            self.pending_connection.set(None);
+            self.search_menu.set(None);
+            self.full_sync();
+            return;
+        }
+
         let def = match self.registry.borrow().get(type_id) { Some(d) => d.clone(), None => return };
         let mut all_ports: Vec<(PortDirection, SocketType, String)> = Vec::new();
         for p in &def.input_ports { all_ports.push((p.direction, p.socket_type, p.label.clone())); }
@@ -475,15 +488,22 @@ impl GraphSignals {
         self.full_sync();
     }
 
-    pub fn add_group_io_port(self: &Rc<Self>) {
-        let selected = self.selection.get_cloned();
-        if selected.len() != 1 { return; }
-        let nid = selected[0];
-        let is_io = self.with_graph(|g| g.world.get::<GroupIOKind>(nid).is_some());
-        if !is_io { return; }
+    pub fn add_group_io_at(self: &Rc<Self>, kind: GroupIOKind, position: (f64, f64)) {
         self.save_undo();
-        self.editor.borrow_mut().add_group_io_port(nid, SocketType::Any, "");
+        self.create_group_io_node(kind, position);
         self.full_sync();
+    }
+
+    fn create_group_io_node(&self, kind: GroupIOKind, position: (f64, f64)) {
+        let io_node = self.editor.borrow_mut().add_group_io_node(kind, SocketType::Any, "");
+        if let Some(node_id) = io_node {
+            self.with_graph_mut(|g| {
+                if let Some(pos) = g.world.get_mut::<nodegraph_core::graph::node::NodePosition>(node_id) {
+                    pos.x = position.0;
+                    pos.y = position.1;
+                }
+            });
+        }
     }
 
     // ============================================================
@@ -575,16 +595,30 @@ impl GraphSignals {
     }
 
     fn full_sync(&self) {
+        let current_gid = self.editor.borrow().current_graph_id();
+        let graph_changed = self.last_synced_graph.get() != Some(current_gid);
+        self.last_synced_graph.set(Some(current_gid));
+
         let nodes: Vec<EntityId> = self.with_graph(|g| g.world.query::<NodeHeader>().map(|(id, _)| id).collect());
-        Self::sync_entity_list(&self.node_list, &nodes);
+        if graph_changed {
+            // Entity IDs are per-world — stale IDs from previous graph must not survive
+            { let mut l = self.node_list.lock_mut(); l.clear(); for &id in &nodes { l.push_cloned(id); } }
+            self.node_positions.borrow_mut().clear();
+            self.node_headers.borrow_mut().clear();
+            self.frame_bounds.borrow_mut().clear();
+        } else {
+            Self::sync_entity_list(&self.node_list, &nodes);
+        }
         {
             let editor = self.editor.borrow();
             let graph = editor.current_graph();
-            let node_set: std::collections::HashSet<EntityId> = nodes.iter().copied().collect();
             let mut positions = self.node_positions.borrow_mut();
             let mut headers = self.node_headers.borrow_mut();
-            positions.retain(|id, _| node_set.contains(id));
-            headers.retain(|id, _| node_set.contains(id));
+            if !graph_changed {
+                let node_set: std::collections::HashSet<EntityId> = nodes.iter().copied().collect();
+                positions.retain(|id, _| node_set.contains(id));
+                headers.retain(|id, _| node_set.contains(id));
+            }
             for &nid in &nodes {
                 let pos = graph.world.get::<NodePosition>(nid).map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
                 if let Some(m) = positions.get(&nid) {
@@ -599,7 +633,11 @@ impl GraphSignals {
             }
         }
         let conns: Vec<EntityId> = self.with_graph(|g| g.world.query::<ConnectionEndpoints>().map(|(id, _)| id).collect());
-        Self::sync_entity_list(&self.connection_list, &conns);
+        if graph_changed {
+            { let mut l = self.connection_list.lock_mut(); l.clear(); for &id in &conns { l.push_cloned(id); } }
+        } else {
+            Self::sync_entity_list(&self.connection_list, &conns);
+        }
         {
             let editor = self.editor.borrow();
             let graph = editor.current_graph();
@@ -617,7 +655,11 @@ impl GraphSignals {
                 }
             }
             drop(editor);
-            Self::sync_entity_list(&self.frame_list, &frames);
+            if graph_changed {
+                { let mut l = self.frame_list.lock_mut(); l.clear(); for &id in &frames { l.push_cloned(id); } }
+            } else {
+                Self::sync_entity_list(&self.frame_list, &frames);
+            }
         }
         self.sync_selection();
         self.recompute_graph_bounds();

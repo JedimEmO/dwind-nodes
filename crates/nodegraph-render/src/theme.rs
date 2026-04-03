@@ -16,10 +16,10 @@ pub struct Theme {
     pub reroute_fill: &'static str,
     pub reroute_stroke: &'static str,
 
-    // Group IO button
-    pub io_button_bg: &'static str,
-    pub io_button_stroke: &'static str,
-    pub io_button_text: &'static str,
+    // Group IO nodes
+    pub io_node_input_bg: &'static str,
+    pub io_node_output_bg: &'static str,
+    pub io_node_text: &'static str,
 
     // Ports
     pub port_stroke: &'static str,
@@ -79,10 +79,10 @@ impl Theme {
             reroute_fill: "#444",
             reroute_stroke: "#888",
 
-            // Group IO button
-            io_button_bg: "#3a3a5e",
-            io_button_stroke: "#555",
-            io_button_text: "#aaa",
+            // Group IO nodes
+            io_node_input_bg: "#2d3d4d",
+            io_node_output_bg: "#3d2d4d",
+            io_node_text: "#ccc",
 
             // Ports
             port_stroke: "rgba(255,255,255,0.3)",

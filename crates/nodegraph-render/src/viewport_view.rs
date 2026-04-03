@@ -92,7 +92,6 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                     "f" | "F" if !ctrl && !shift => { gs.create_frame_around_selected(); true }
                     "g" | "G" if !ctrl && !shift => { gs.group_selected(); true }
                     "g" | "G" if shift && !ctrl => { gs.ungroup_selected(); true }
-                    "+" | "=" => { gs.add_group_io_port(); true }
                     "a" | "A" if shift && !ctrl => {
                         let (wx, wy) = gs.cursor_world.get();
                         gs.open_search_menu(wx, wy);

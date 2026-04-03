@@ -27,6 +27,17 @@ fn port_offset(graph: &nodegraph_core::graph::NodeGraph, port_id: EntityId) -> O
         return Some(Vec2::new(cx, 0.0));
     }
 
+    // Group IO nodes place ports at the edge, centered vertically
+    if let Some(kind) = graph.world.get::<nodegraph_core::graph::GroupIOKind>(owner) {
+        use nodegraph_core::graph::GroupIOKind;
+        let cx = match (kind, dir) {
+            (GroupIOKind::Input, PortDirection::Output) => layout::IO_NODE_WIDTH,
+            (GroupIOKind::Output, PortDirection::Input) => 0.0,
+            _ => 0.0,
+        };
+        return Some(Vec2::new(cx, layout::IO_NODE_HEIGHT / 2.0));
+    }
+
     let idx = graph.world.get::<PortIndex>(port_id)?.0 as f64;
     let cx = match dir {
         PortDirection::Input => 0.0,

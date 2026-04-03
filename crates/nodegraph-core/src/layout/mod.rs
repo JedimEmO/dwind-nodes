@@ -9,6 +9,8 @@ pub const PORT_HEIGHT: f64 = 22.0;
 pub const PORT_RADIUS: f64 = 6.0;
 pub const NODE_MIN_WIDTH: f64 = 160.0;
 pub const REROUTE_SIZE: f64 = 10.0;
+pub const IO_NODE_WIDTH: f64 = 120.0;
+pub const IO_NODE_HEIGHT: f64 = 28.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Vec2 {
@@ -105,6 +107,35 @@ pub fn compute_node_layout(graph: &NodeGraph, node_id: EntityId) -> Option<Compu
         let output_port_positions = outputs.iter().map(|&(pid, _)| {
             (pid, Vec2::new(pos.x + REROUTE_SIZE, pos.y))
         }).collect();
+        return Some(ComputedNodeLayout {
+            header_rect: total_rect,
+            body_rect: total_rect,
+            total_rect,
+            input_port_positions,
+            output_port_positions,
+        });
+    }
+
+    // Group IO nodes: small rect with single port on one edge
+    if let Some(kind) = graph.world.get::<crate::graph::GroupIOKind>(node_id) {
+        let total_rect = Rect::new(pos.x, pos.y, IO_NODE_WIDTH, IO_NODE_HEIGHT);
+        let port_y = pos.y + IO_NODE_HEIGHT / 2.0;
+        let (input_port_positions, output_port_positions) = match kind {
+            crate::graph::GroupIOKind::Input => {
+                // Input IO node has Output ports on the right edge
+                let out_positions = outputs.iter().map(|&(pid, _)| {
+                    (pid, Vec2::new(pos.x + IO_NODE_WIDTH, port_y))
+                }).collect();
+                (vec![], out_positions)
+            }
+            crate::graph::GroupIOKind::Output => {
+                // Output IO node has Input ports on the left edge
+                let in_positions = inputs.iter().map(|&(pid, _)| {
+                    (pid, Vec2::new(pos.x, port_y))
+                }).collect();
+                (in_positions, vec![])
+            }
+        };
         return Some(ComputedNodeLayout {
             header_rect: total_rect,
             body_rect: total_rect,

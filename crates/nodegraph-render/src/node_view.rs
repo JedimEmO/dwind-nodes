@@ -43,14 +43,20 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
         .unwrap_or(NodeHeader { title: "?".to_string(), color: [100, 100, 100], collapsed: false });
     let is_muted = graph.world.get::<MuteState>(node_id).map(|m| m.0).unwrap_or(false);
     let is_group = graph.world.get::<nodegraph_core::graph::group::SubgraphRoot>(node_id).is_some();
-    let is_group_io = graph.world.get::<nodegraph_core::graph::GroupIOKind>(node_id).is_some();
+    let io_kind = graph.world.get::<nodegraph_core::graph::GroupIOKind>(node_id).cloned();
     let is_reroute = graph.world.get::<nodegraph_core::graph::reroute::IsReroute>(node_id).is_some();
     drop(editor);
+
+    // Group IO nodes render as small labeled rects
+    if let Some(kind) = io_kind {
+        return render_group_io(node_id, pos_signal, selection, &input_ports, &output_ports, kind, gs);
+    }
 
     // Reroute nodes render as a small diamond
     if is_reroute {
         return render_reroute(node_id, pos_signal, selection, &input_ports, &output_ports, gs);
     }
+
 
     let collapsed = header.collapsed;
     let num_rows = if collapsed { 0 } else { input_ports.len().max(output_ports.len()) };
@@ -180,43 +186,6 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
             }).collect::<Vec<_>>()
         })
 
-        // "Add port" button for Group IO nodes
-        .apply(|b| if is_group_io {
-            let button_y = total_height + 4.0;
-            b.child(svg!("g", {
-                .attr("cursor", "pointer")
-                .event(clone!(gs, node_id => move |e: events::Click| {
-                    e.stop_propagation();
-                    gs.select_single(node_id);
-                    gs.add_group_io_port();
-                }))
-
-                // Button background
-                .child(svg!("rect", {
-                    .attr("x", &format!("{}", NODE_MIN_WIDTH / 2.0 - 30.0))
-                    .attr("y", &format!("{}", button_y))
-                    .attr("width", "60")
-                    .attr("height", "18")
-                    .attr("rx", "9")
-                    .attr("fill", gs.theme.io_button_bg)
-                    .attr("stroke", gs.theme.io_button_stroke)
-                    .attr("stroke-width", "1")
-                }))
-
-                // "+" label
-                .child(svg!("text", {
-                    .attr("x", &format!("{}", NODE_MIN_WIDTH / 2.0))
-                    .attr("y", &format!("{}", button_y + 13.0))
-                    .attr("text-anchor", "middle")
-                    .attr("fill", gs.theme.io_button_text)
-                    .attr("font-size", "12")
-                    .attr("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-                    .text("+ port")
-                }))
-            }))
-        } else {
-            b
-        })
     })
 }
 
@@ -336,5 +305,90 @@ fn render_reroute(
         .children(output_ports.iter().map(|&(pid, st, _, _)| {
             render_port(pid, st, PortDirection::Output, size, 0.0, 200, 200, 200, gs)
         }).collect::<Vec<_>>())
+    })
+}
+
+fn render_group_io(
+    node_id: EntityId,
+    pos_signal: Mutable<(f64, f64)>,
+    selection: Mutable<Vec<EntityId>>,
+    input_ports: &[(EntityId, SocketType, String, u32)],
+    output_ports: &[(EntityId, SocketType, String, u32)],
+    io_kind: nodegraph_core::graph::GroupIOKind,
+    gs: &Rc<GraphSignals>,
+) -> Dom {
+    use nodegraph_core::layout::{IO_NODE_WIDTH, IO_NODE_HEIGHT};
+    use nodegraph_core::graph::GroupIOKind;
+
+    let is_input = matches!(io_kind, GroupIOKind::Input);
+
+    let title = gs.get_node_header_signal(node_id)
+        .map(|m| m.get_cloned().title)
+        .unwrap_or_else(|| "IO".to_string());
+
+    // Get the socket type color from the single port
+    let port_color = if is_input {
+        output_ports.first().map(|(_, st, _, _)| st.default_color())
+    } else {
+        input_ports.first().map(|(_, st, _, _)| st.default_color())
+    }.unwrap_or([160, 160, 160]);
+
+    let [pr, pg, pb] = port_color;
+    let bg_color = if is_input { gs.theme.io_node_input_bg } else { gs.theme.io_node_output_bg };
+    let highlight = gs.theme.selection_highlight;
+
+    svg!("g", {
+        .attr(ATTR_NODE_ID, &format!("{}", node_id.index))
+        .attr_signal("transform", pos_signal.signal().map(|(x, y)| format!("translate({}, {})", x, y)))
+
+        // Background rect
+        .child(svg!("rect", {
+            .attr("width", &format!("{}", IO_NODE_WIDTH))
+            .attr("height", &format!("{}", IO_NODE_HEIGHT))
+            .attr("rx", "4")
+            .attr("fill", bg_color)
+            .attr("stroke", &format!("rgb({},{},{})", pr, pg, pb))
+            .attr("stroke-width", "1.5")
+        }))
+
+        // Selection highlight
+        .child(svg!("rect", {
+            .attr("width", &format!("{}", IO_NODE_WIDTH))
+            .attr("height", &format!("{}", IO_NODE_HEIGHT))
+            .attr("rx", "4")
+            .attr("fill", "none")
+            .attr_signal("stroke", {
+                let node_id = node_id;
+                selection.signal_cloned().map(move |sel| {
+                    if sel.contains(&node_id) { highlight } else { "none" }
+                })
+            })
+            .attr("stroke-width", "2")
+        }))
+
+        // Label text
+        .child(svg!("text", {
+            .attr("x", &format!("{}", IO_NODE_WIDTH / 2.0))
+            .attr("y", &format!("{}", IO_NODE_HEIGHT / 2.0 + 4.0))
+            .attr("text-anchor", "middle")
+            .attr("fill", gs.theme.io_node_text)
+            .attr("font-size", "10")
+            .attr("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
+            .attr("pointer-events", "none")
+            .text(&title)
+        }))
+
+        // Port circle — on right edge for Input IO, left edge for Output IO
+        .children(if is_input {
+            output_ports.iter().map(|&(pid, st, _, _)| {
+                let [cr, cg, cb] = st.default_color();
+                render_port(pid, st, PortDirection::Output, IO_NODE_WIDTH, IO_NODE_HEIGHT / 2.0, cr, cg, cb, gs)
+            }).collect::<Vec<_>>()
+        } else {
+            input_ports.iter().map(|&(pid, st, _, _)| {
+                let [cr, cg, cb] = st.default_color();
+                render_port(pid, st, PortDirection::Input, 0.0, IO_NODE_HEIGHT / 2.0, cr, cg, cb, gs)
+            }).collect::<Vec<_>>()
+        })
     })
 }

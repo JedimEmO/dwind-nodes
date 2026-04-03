@@ -423,8 +423,8 @@ impl GraphEditor {
         let mut node_set: std::collections::HashSet<EntityId> = node_ids.iter().copied().collect();
 
         // Identify cut connections: connections where one end is in the selection and the other isn't
-        let mut external_inputs: Vec<(EntityId, EntityId, SocketType)> = Vec::new(); // (ext_src_port, int_tgt_port, type)
-        let mut external_outputs: Vec<(EntityId, EntityId, SocketType)> = Vec::new(); // (int_src_port, ext_tgt_port, type)
+        let mut external_inputs: Vec<(EntityId, EntityId, SocketType, String)> = Vec::new(); // (ext_src_port, int_tgt_port, type, label)
+        let mut external_outputs: Vec<(EntityId, EntityId, SocketType, String)> = Vec::new(); // (int_src_port, ext_tgt_port, type, label)
         let mut internal_connections: std::collections::HashSet<(EntityId, EntityId)> = std::collections::HashSet::new();
 
         for &nid in node_ids {
@@ -442,11 +442,13 @@ impl GraphEditor {
                         } else if src_in && !tgt_in {
                             // Output goes external
                             let st = parent.world.get::<PortSocketType>(ep.source_port).map(|s| s.0).unwrap_or(SocketType::Float);
-                            external_outputs.push((ep.source_port, ep.target_port, st));
+                            let label = parent.world.get::<PortLabel>(ep.source_port).map(|l| l.0.clone()).unwrap_or_default();
+                            external_outputs.push((ep.source_port, ep.target_port, st, label));
                         } else if !src_in && tgt_in {
                             // Input comes from external
                             let st = parent.world.get::<PortSocketType>(ep.target_port).map(|s| s.0).unwrap_or(SocketType::Float);
-                            external_inputs.push((ep.source_port, ep.target_port, st));
+                            let label = parent.world.get::<PortLabel>(ep.target_port).map(|l| l.0.clone()).unwrap_or_default();
+                            external_inputs.push((ep.source_port, ep.target_port, st, label));
                         }
                     }
                 }
@@ -478,39 +480,54 @@ impl GraphEditor {
 
         // Create group input/output ports on the group node
         let mut group_input_ports = Vec::new();
-        for (_, _, st) in &external_inputs {
-            let gp = parent.add_port(group_node, PortDirection::Input, *st, "In");
+        for (_, _, st, label) in &external_inputs {
+            let gp = parent.add_port(group_node, PortDirection::Input, *st, label);
             group_input_ports.push(gp);
         }
         let mut group_output_ports = Vec::new();
-        for (_, _, st) in &external_outputs {
-            let gp = parent.add_port(group_node, PortDirection::Output, *st, "Out");
+        for (_, _, st, label) in &external_outputs {
+            let gp = parent.add_port(group_node, PortDirection::Output, *st, label);
             group_output_ports.push(gp);
         }
 
         // Reconnect external connections to group node ports
-        for (i, (ext_src, _, _)) in external_inputs.iter().enumerate() {
+        for (i, (ext_src, _, _, _)) in external_inputs.iter().enumerate() {
             let _ = parent.connect(*ext_src, group_input_ports[i]);
         }
-        for (i, (_, ext_tgt, _)) in external_outputs.iter().enumerate() {
+        for (i, (_, ext_tgt, _, _)) in external_outputs.iter().enumerate() {
             let _ = parent.connect(group_output_ports[i], *ext_tgt);
         }
 
-        // Create Group IO nodes inside subgraph
-        let group_input_node = subgraph.add_node("Group Input", (0.0, 0.0));
-        subgraph.world.insert(group_input_node, GroupIOKind::Input);
-        let group_output_node = subgraph.add_node("Group Output", (400.0, 0.0));
-        subgraph.world.insert(group_output_node, GroupIOKind::Output);
+        // Compute bounding box of nodes being moved into subgraph
+        let mut min_x = f64::MAX;
+        let mut min_y = f64::MAX;
+        let mut max_x = f64::MIN;
+        for &nid in node_ids {
+            if let Some(pos) = parent.world.get::<NodePosition>(nid) {
+                min_x = min_x.min(pos.x);
+                min_y = min_y.min(pos.y);
+                max_x = max_x.max(pos.x + crate::layout::NODE_MIN_WIDTH);
+            }
+        }
+        if min_x == f64::MAX { min_x = 0.0; min_y = 0.0; max_x = 200.0; }
+        let io_input_x = min_x - 200.0;
+        let io_output_x = max_x + 80.0;
 
-        // Add ports to IO nodes matching the group node's ports
+        // Create individual Group IO nodes inside subgraph — one per external connection
         let mut sub_input_ports = Vec::new();
-        for (_, _, st) in &external_inputs {
-            let sp = subgraph.add_port(group_input_node, PortDirection::Output, *st, "In");
+        for (i, (_, _, st, label)) in external_inputs.iter().enumerate() {
+            let io_node = subgraph.add_node(&format!("In: {}", label), (io_input_x, min_y + i as f64 * 50.0));
+            subgraph.world.insert(io_node, GroupIOKind::Input);
+            subgraph.world.insert(io_node, group::GroupIOLabel(label.clone()));
+            let sp = subgraph.add_port(io_node, PortDirection::Output, *st, label);
             sub_input_ports.push(sp);
         }
         let mut sub_output_ports = Vec::new();
-        for (_, _, st) in &external_outputs {
-            let sp = subgraph.add_port(group_output_node, PortDirection::Input, *st, "Out");
+        for (i, (_, _, st, label)) in external_outputs.iter().enumerate() {
+            let io_node = subgraph.add_node(&format!("Out: {}", label), (io_output_x, min_y + i as f64 * 50.0));
+            subgraph.world.insert(io_node, GroupIOKind::Output);
+            subgraph.world.insert(io_node, group::GroupIOLabel(label.clone()));
+            let sp = subgraph.add_port(io_node, PortDirection::Input, *st, label);
             sub_output_ports.push(sp);
         }
 
@@ -550,12 +567,12 @@ impl GraphEditor {
         }
 
         // Connect IO nodes to the recreated internal ports
-        for (i, (_, int_tgt_port, _)) in external_inputs.iter().enumerate() {
+        for (i, (_, int_tgt_port, _, _)) in external_inputs.iter().enumerate() {
             if let Some(&new_tgt) = old_to_new_port.get(int_tgt_port) {
                 let _ = subgraph.connect(sub_input_ports[i], new_tgt);
             }
         }
-        for (i, (int_src_port, _, _)) in external_outputs.iter().enumerate() {
+        for (i, (int_src_port, _, _, _)) in external_outputs.iter().enumerate() {
             if let Some(&new_src) = old_to_new_port.get(int_src_port) {
                 let _ = subgraph.connect(new_src, sub_output_ports[i]);
             }
@@ -717,55 +734,40 @@ impl GraphEditor {
     }
 
     /// Add a port to a Group Input or Group Output node.
+    /// Create a new individual IO node inside the current subgraph.
     /// Also adds the corresponding port on the parent graph's group node.
-    /// Returns the new port's EntityId in the subgraph, or None on failure.
-    pub fn add_group_io_port(&mut self, io_node_id: EntityId, socket_type: SocketType, label: &str) -> Option<EntityId> {
+    /// Returns the new IO node's EntityId, or None on failure.
+    pub fn add_group_io_node(&mut self, kind: GroupIOKind, socket_type: SocketType, label: &str) -> Option<EntityId> {
         let current_id = self.current_graph_id;
-
-        // Can't add IO ports at root level
         if current_id == self.root_graph_id { return None; }
 
-        // Determine if it's an input or output IO node
-        let io_kind = {
-            let sub = self.graphs.get(&current_id)?;
-            sub.world.get::<GroupIOKind>(io_node_id)?.clone()
-        };
-
-        // Find the parent graph and group node that owns this subgraph
         let (parent_id, group_node_id) = self.find_parent_group(current_id)?;
 
-        // Add port on the IO node inside the subgraph
-        let sub_port = {
-            let sub = self.graphs.get_mut(&current_id)?;
-            match io_kind {
-                GroupIOKind::Input => {
-                    // Group Input node has Output ports (data flows from input into subgraph)
-                    sub.add_port(io_node_id, PortDirection::Output, socket_type, label)
-                }
-                GroupIOKind::Output => {
-                    // Group Output node has Input ports (data flows from subgraph to output)
-                    sub.add_port(io_node_id, PortDirection::Input, socket_type, label)
-                }
-            }
+        let title = match &kind {
+            GroupIOKind::Input => format!("In: {}", label),
+            GroupIOKind::Output => format!("Out: {}", label),
         };
 
-        // Add corresponding port on the group node in the parent graph
-        let parent_port = {
-            let parent = self.graphs.get_mut(&parent_id)?;
-            match io_kind {
-                GroupIOKind::Input => {
-                    parent.add_port(group_node_id, PortDirection::Input, socket_type, label)
-                }
-                GroupIOKind::Output => {
-                    parent.add_port(group_node_id, PortDirection::Output, socket_type, label)
-                }
-            }
+        // Create IO node in subgraph with single port
+        let sub = self.graphs.get_mut(&current_id)?;
+        let io_node = sub.add_node(&title, (0.0, 0.0));
+        sub.world.insert(io_node, kind.clone());
+        sub.world.insert(io_node, group::GroupIOLabel(label.to_string()));
+
+        let sub_port = match &kind {
+            GroupIOKind::Input => sub.add_port(io_node, PortDirection::Output, socket_type, label),
+            GroupIOKind::Output => sub.add_port(io_node, PortDirection::Input, socket_type, label),
         };
 
-        // Store the mapping
+        // Add corresponding port on parent group node
+        let parent = self.graphs.get_mut(&parent_id)?;
+        let parent_port = match &kind {
+            GroupIOKind::Input => parent.add_port(group_node_id, PortDirection::Input, socket_type, label),
+            GroupIOKind::Output => parent.add_port(group_node_id, PortDirection::Output, socket_type, label),
+        };
+
         self.io_port_mapping.insert(sub_port, parent_port);
-
-        Some(sub_port)
+        Some(io_node)
     }
 
     /// After a connection is made to a Group IO port, adapt its type to match
@@ -873,6 +875,24 @@ mod graph_editor_tests {
         // Subgraph should have internal connections:
         // Group Input → B's input, B's output → Group Output
         assert_eq!(sub.connection_count(), 2, "Subgraph should have IO→B and B→IO connections");
+
+        // Verify each IO node has exactly 1 port and GroupIOKind
+        for (nid, kind) in sub.world.query::<GroupIOKind>() {
+            let ports = sub.node_ports(nid);
+            assert_eq!(ports.len(), 1, "IO node {:?} ({:?}) should have 1 port, got {}", nid, kind, ports.len());
+            let header = sub.world.get::<NodeHeader>(nid).unwrap();
+            assert!(header.title.starts_with("In:") || header.title.starts_with("Out:"),
+                "IO node title should start with In:/Out:, got '{}'", header.title);
+        }
+
+        // Verify moved node B is NOT marked as GroupIOKind and has original ports
+        for (nid, header) in sub.world.query::<NodeHeader>() {
+            if sub.world.get::<GroupIOKind>(nid).is_none() {
+                assert_eq!(header.title, "B", "Non-IO node should be B, got '{}'", header.title);
+                let ports = sub.node_ports(nid);
+                assert_eq!(ports.len(), 2, "Node B should have 2 ports (In + Out), got {}", ports.len());
+            }
+        }
     }
 
     #[test]
@@ -934,37 +954,32 @@ mod graph_editor_tests {
     }
 
     #[test]
-    fn add_group_io_port() {
+    fn add_group_io_node() {
         let mut ge = GraphEditor::new();
         let (_n1, n2, _n3) = build_chain(&mut ge);
-        let (group_node, subgraph_id) = ge.group_nodes(&[n2]).unwrap();
+        let (group_node, _subgraph_id) = ge.group_nodes(&[n2]).unwrap();
 
-        // Enter the group
         ge.enter_group(group_node);
 
-        // Find the Group Input node
-        let sub = ge.current_graph();
-        let input_node = sub.world.query::<GroupIOKind>()
-            .find(|(_, k)| *k == &GroupIOKind::Input)
-            .map(|(id, _)| id).unwrap();
+        // Count IO nodes before
+        let io_count_before = ge.current_graph().world.query::<GroupIOKind>().count();
 
-        // Count ports before
-        let ports_before = sub.node_ports(input_node).len();
-
-        // Add a port
-        drop(sub);
-        let result = ge.add_group_io_port(input_node, SocketType::Color, "Custom");
+        // Add a new input IO node
+        let result = ge.add_group_io_node(GroupIOKind::Input, SocketType::Color, "Custom");
         assert!(result.is_some());
 
-        // Subgraph IO node should have one more port
-        let sub = ge.current_graph();
-        assert_eq!(sub.node_ports(input_node).len(), ports_before + 1);
+        // Should have one more IO node
+        let io_count_after = ge.current_graph().world.query::<GroupIOKind>().count();
+        assert_eq!(io_count_after, io_count_before + 1);
 
-        // Exit and check the group node in parent also got the port
+        // The new IO node should have exactly 1 port
+        let new_io = result.unwrap();
+        assert_eq!(ge.current_graph().node_ports(new_io).len(), 1);
+
+        // Exit and check the group node in parent gained a port
         ge.exit_group();
         let parent = ge.current_graph();
         let group_ports = parent.node_ports(group_node);
-        // Group node should have: original input + output ports + the new input
         assert!(group_ports.len() > 2, "Group node should have gained a port");
     }
 

@@ -975,7 +975,7 @@ fn test_ungroup() {
 }
 
 #[wasm_bindgen_test]
-fn test_add_group_io_port() {
+fn test_add_group_io_node() {
     let (gs, _n1, n2, _n3) = setup_three_node_chain();
     let _tc = render_sync(&gs);
 
@@ -987,29 +987,21 @@ fn test_add_group_io_port() {
             .map(|(id, _)| id).next().unwrap()
     });
 
-    // Count group node ports before
     let ports_before = gs.with_graph(|g| g.node_ports(group_node).len());
 
-    // Enter group
     gs.enter_group(group_node);
 
-    // Find Group Input node
-    let input_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::GroupIOKind>()
-            .find(|(_, k)| **k == nodegraph_core::graph::GroupIOKind::Input)
-            .map(|(id, _)| id).unwrap()
-    });
+    // Count IO nodes before
+    let io_count_before = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
 
-    // Add a port via the add_group_io_port method
-    gs.controller.borrow_mut().selection.clear();
-    gs.select_single(input_node);
-    gs.add_group_io_port();
+    // Add a new input IO node
+    gs.add_group_io_at(nodegraph_core::graph::GroupIOKind::Input, (50.0, 200.0));
 
-    // IO node should have one more port
-    let io_ports_after = gs.with_graph(|g| g.node_ports(input_node).len());
-    assert!(io_ports_after > 0, "IO node should have ports");
+    // Should have one more IO node
+    let io_count_after = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
+    assert_eq!(io_count_after, io_count_before + 1, "Should have one more IO node");
 
-    // Exit and check group node in parent
+    // Exit and check group node gained a port
     let root_id = gs.editor.borrow().root_graph_id();
     gs.navigate_to_graph(root_id);
 
@@ -1018,7 +1010,7 @@ fn test_add_group_io_port() {
 }
 
 #[wasm_bindgen_test]
-fn test_group_io_port_type_adapts() {
+fn test_group_io_node_type_adapts() {
     let (gs, _n1, n2, _n3) = setup_three_node_chain();
     let _tc = render_sync(&gs);
 
@@ -1032,30 +1024,27 @@ fn test_group_io_port_type_adapts() {
 
     gs.enter_group(group_node);
 
-    // Find Group Input node and add an Any port
-    let input_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::GroupIOKind>()
-            .find(|(_, k)| **k == nodegraph_core::graph::GroupIOKind::Input)
-            .map(|(id, _)| id).unwrap()
-    });
+    // Add a new input IO node with Any type
+    gs.add_group_io_at(nodegraph_core::graph::GroupIOKind::Input, (50.0, 200.0));
 
-    gs.controller.borrow_mut().selection.clear();
-    gs.select_single(input_node);
-    gs.add_group_io_port();
-
-    // Find the new Any port on the IO node
+    // Find the new Any-typed IO node (most recent one)
     let new_io_port = gs.with_graph(|g| {
-        let ports = g.node_ports(input_node);
-        ports.iter().find(|&&p| {
-            g.world.get::<nodegraph_core::graph::port::PortSocketType>(p)
-                .map(|s| s.0 == SocketType::Any).unwrap_or(false)
-        }).copied()
+        let mut any_ports = Vec::new();
+        for (nid, _) in g.world.query::<nodegraph_core::graph::GroupIOKind>() {
+            for &pid in g.node_ports(nid) {
+                if let Some(st) = g.world.get::<nodegraph_core::graph::port::PortSocketType>(pid) {
+                    if st.0 == SocketType::Any {
+                        any_ports.push(pid);
+                    }
+                }
+            }
+        }
+        any_ports.last().copied()
     });
-    assert!(new_io_port.is_some(), "Should have an Any-type port on IO node");
+    assert!(new_io_port.is_some(), "Should have an Any-type port on new IO node");
     let new_io_port = new_io_port.unwrap();
 
-    // Create a Color node inside the subgraph that has a Color INPUT
-    // (Group Input outputs flow INTO the subgraph, so connect IO output → node input)
+    // Create a Color node inside the subgraph
     let color_node = gs.add_node("ColorSink", (100.0, 100.0), vec![
         (PortDirection::Input, SocketType::Color, "Color".to_string()),
     ]);
@@ -1112,8 +1101,8 @@ fn test_nested_groups() {
     gs.enter_group(outer_group);
     assert_eq!(gs.breadcrumb.lock_ref().len(), 2);
 
-    // Inside: GroupInput, B, C, GroupOutput (4 nodes)
-    assert_eq!(gs.node_count(), 4, "Outer subgraph should have IO + B + C");
+    // Inside: B, C (no IO nodes because no external connections)
+    assert_eq!(gs.node_count(), 2, "Outer subgraph should have B + C (no IO — no external connections)");
 
     // Now group just C inside the subgraph (nested group)
     let inner_c = gs.with_graph(|g| {
@@ -1128,8 +1117,8 @@ fn test_nested_groups() {
     gs.select_single(inner_c);
     gs.group_selected();
 
-    // Outer subgraph: GroupInput, B, InnerGroup, GroupOutput (4 nodes)
-    assert_eq!(gs.node_count(), 4, "Should still have 4 nodes after inner grouping");
+    // Outer subgraph: B, InnerGroup (2 nodes — no IO because no external connections)
+    assert_eq!(gs.node_count(), 2, "Should have B + InnerGroup after inner grouping");
 
     // Find and enter the inner group
     let inner_group = gs.with_graph(|g| {
@@ -1141,8 +1130,8 @@ fn test_nested_groups() {
     // Breadcrumb: Root > OuterGroup > InnerGroup (3 levels)
     assert_eq!(gs.breadcrumb.lock_ref().len(), 3, "Should be 3 levels deep");
 
-    // Inner subgraph: GroupInput, C, GroupOutput (3 nodes)
-    assert_eq!(gs.node_count(), 3, "Inner subgraph should have IO + C");
+    // Inner subgraph: just C (no IO — no connections existed)
+    assert_eq!(gs.node_count(), 1, "Inner subgraph should have just C");
 
     // Navigate all the way back to root
     gs.navigate_to_graph(root_id);
@@ -1328,7 +1317,7 @@ fn test_undo_ungroup() {
 }
 
 #[wasm_bindgen_test]
-fn test_undo_add_io_port() {
+fn test_undo_add_io_node() {
     let (gs, _n1, n2, _n3) = setup_three_node_chain();
     let _tc = render_sync(&gs);
 
@@ -1342,32 +1331,26 @@ fn test_undo_add_io_port() {
 
     let group_ports_before = gs.with_graph(|g| g.node_ports(group_node).len());
 
-    // Enter group and add IO port
     gs.enter_group(group_node);
 
-    let input_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::GroupIOKind>()
-            .find(|(_, k)| **k == nodegraph_core::graph::GroupIOKind::Input)
-            .map(|(id, _)| id).unwrap()
-    });
-    let io_ports_before = gs.with_graph(|g| g.node_ports(input_node).len());
+    let io_count_before = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
 
-    gs.select_single(input_node);
-    gs.add_group_io_port();
+    // Add a new IO node
+    gs.add_group_io_at(nodegraph_core::graph::GroupIOKind::Input, (50.0, 200.0));
 
-    let io_ports_after = gs.with_graph(|g| g.node_ports(input_node).len());
-    assert_eq!(io_ports_after, io_ports_before + 1, "IO port should be added");
+    let io_count_after = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
+    assert_eq!(io_count_after, io_count_before + 1, "IO node should be added");
 
-    // Undo → port should be gone
+    // Undo → IO node should be gone
     gs.undo();
-    let io_ports_undone = gs.with_graph(|g| g.node_ports(input_node).len());
-    assert_eq!(io_ports_undone, io_ports_before, "After undo: IO port should be removed. Got {}", io_ports_undone);
+    let io_count_undone = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
+    assert_eq!(io_count_undone, io_count_before, "After undo: IO node should be removed");
 
     // Check parent group node also lost the port
     let root_id = gs.editor.borrow().root_graph_id();
     gs.navigate_to_graph(root_id);
     let group_ports_undone = gs.with_graph(|g| g.node_ports(group_node).len());
-    assert_eq!(group_ports_undone, group_ports_before, "After undo: parent group port should be removed too. Got {}", group_ports_undone);
+    assert_eq!(group_ports_undone, group_ports_before, "After undo: parent group port should be removed too");
 }
 
 #[wasm_bindgen_test]
@@ -2144,6 +2127,73 @@ async fn test_noodle_drop_search_menu_dom_filtered() {
     // Math Add has Float input — should NOT appear
     assert!(!text.contains("Math Add"),
         "DOM should NOT show Math Add for Shader source, got: {}", text);
+}
+
+// ── Group IO nodes render as compact rects ──────────────────────────
+#[wasm_bindgen_test]
+async fn test_group_io_nodes_render_compact() {
+    use nodegraph_core::layout::IO_NODE_WIDTH;
+
+    let gs = GraphSignals::new();
+    let n1 = gs.add_node("A", (0.0, 0.0), vec![
+        (PortDirection::Output, SocketType::Float, "Out".to_string()),
+    ]);
+    let n2 = gs.add_node("B", (200.0, 0.0), vec![
+        (PortDirection::Input, SocketType::Float, "In".to_string()),
+        (PortDirection::Output, SocketType::Float, "Out".to_string()),
+    ]);
+    let n3 = gs.add_node("C", (400.0, 0.0), vec![
+        (PortDirection::Input, SocketType::Float, "In".to_string()),
+    ]);
+
+    // Connect A→B→C
+    let (a_out, b_in, b_out, c_in) = gs.with_graph(|g| {
+        (g.node_ports(n1)[0], g.node_ports(n2)[0], g.node_ports(n2)[1], g.node_ports(n3)[0])
+    });
+    gs.connect_ports(a_out, b_in);
+    gs.connect_ports(b_out, c_in);
+
+    let _tc = render_sync(&gs);
+
+    // Group B
+    gs.select_single(n2);
+    gs.group_selected();
+
+    // Find and enter the group
+    let group_node = gs.with_graph(|g| {
+        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id).next().unwrap()
+    });
+    gs.enter_group(group_node);
+
+    // Flush signals
+    let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+
+    // Inside the group we should have: 1 Input IO + B + 1 Output IO = 3 nodes
+    assert_eq!(gs.node_count(), 3, "Subgraph should have Input IO + B + Output IO");
+
+    // Verify IO nodes have GroupIOKind
+    let io_count = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
+    assert_eq!(io_count, 2, "Should have 2 IO nodes");
+
+    // Check DOM: IO node rects should have width = IO_NODE_WIDTH (120)
+    let doc = web_sys::window().unwrap().document().unwrap();
+    let node_groups = doc.query_selector_all("[data-node-id]").unwrap();
+    let mut io_width_count = 0;
+    for i in 0..node_groups.length() {
+        if let Some(el) = node_groups.get(i) {
+            if let Ok(el) = el.dyn_into::<web_sys::Element>() {
+                if let Some(rect) = el.query_selector("rect").unwrap() {
+                    let w = rect.get_attribute("width").unwrap_or_default();
+                    if w == format!("{}", IO_NODE_WIDTH) {
+                        io_width_count += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(io_width_count, 2, "Should have 2 IO nodes rendered with IO_NODE_WIDTH={}, found {}", IO_NODE_WIDTH, io_width_count);
 }
 
 // ============================================================

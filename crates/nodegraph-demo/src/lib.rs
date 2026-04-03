@@ -66,6 +66,15 @@ fn register_demo_node_types(reg: &mut NodeTypeRegistry) {
             PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into() },
         ],
     });
+    // Group IO nodes — only functional inside subgraphs
+    reg.register(NodeTypeDefinition {
+        type_id: "group_input".into(), display_name: "Group Input".into(), category: "Group".into(),
+        input_ports: vec![], output_ports: vec![],
+    });
+    reg.register(NodeTypeDefinition {
+        type_id: "group_output".into(), display_name: "Group Output".into(), category: "Group".into(),
+        input_ports: vec![], output_ports: vec![],
+    });
 }
 
 #[wasm_bindgen(start)]
