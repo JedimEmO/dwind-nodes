@@ -125,6 +125,8 @@ pub enum SideEffect {
     NodesMoved,
     ConnectionCreated(EntityId),
     ConnectionFailed,
+    FrameSelected(EntityId),
+    FrameDeselected,
 }
 
 // ============================================================
@@ -258,6 +260,11 @@ impl InteractionController {
         match event {
             InputEvent::MouseDown { world, button: MouseButton::Left, modifiers, .. } => {
                 let target = hit_test(graph, cache, world);
+                // Deselect frames when clicking on non-frame targets
+                if !matches!(target, HitTarget::Frame(_)) {
+                    effects.push(SideEffect::FrameDeselected);
+                }
+
                 match target {
                     HitTarget::Port(port_id) => {
                         let from_output = graph
@@ -297,7 +304,7 @@ impl InteractionController {
                         };
                     }
                     HitTarget::Frame(frame_id) => {
-                        // Select all member nodes and drag them
+                        // Select the frame and all its member nodes
                         let members = cache.frame_rects.get(&frame_id)
                             .map(|(_, m)| m.clone())
                             .unwrap_or_default();
@@ -307,6 +314,7 @@ impl InteractionController {
                         for &nid in &members {
                             self.selection.select(nid);
                         }
+                        effects.push(SideEffect::FrameSelected(frame_id));
                         effects.push(SideEffect::SelectionChanged);
 
                         let node_ids: Vec<EntityId> = self.selection.selected.clone();

@@ -2023,3 +2023,49 @@ fn test_frame_drag_moves_members() {
     assert!((new_n2.0 - orig_n2.0 - 50.0).abs() < 1e-6, "N2 x should move by 50");
     assert!((new_n2.1 - orig_n2.1 - 30.0).abs() < 1e-6, "N2 y should move by 30");
 }
+
+// ── Delete frame via frame selection + delete_selected ──────────────
+#[wasm_bindgen_test]
+fn test_delete_selected_frame() {
+    let (gs, _, _, _, _) = new_two_node_graph();
+    let _tc = render_sync(&gs);
+
+    let n1 = gs.node_list.lock_ref()[0];
+    let n2 = gs.node_list.lock_ref()[1];
+
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.selection.set(vec![n1, n2]);
+    gs.create_frame_around_selected();
+
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 1);
+
+    // Select the frame by clicking in its padding
+    use nodegraph_core::interaction::{InputEvent, MouseButton, Modifiers};
+    use nodegraph_core::layout::Vec2;
+    let click = Vec2::new(75.0, 75.0);
+    gs.handle_input(InputEvent::MouseDown {
+        screen: click, world: click,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+    gs.handle_input(InputEvent::MouseUp {
+        screen: click, world: click,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    });
+
+    assert_eq!(gs.selected_frames.get_cloned().len(), 1, "Frame should be selected");
+
+    // Delete — should remove frame AND selected member nodes
+    gs.delete_selected();
+
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 0, "Frame should be deleted");
+    assert_eq!(gs.node_count(), 0, "Member nodes should also be deleted");
+
+    // Undo restores everything
+    gs.undo();
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 1, "Frame restored after undo");
+    assert_eq!(gs.node_count(), 2, "Nodes restored after undo");
+}

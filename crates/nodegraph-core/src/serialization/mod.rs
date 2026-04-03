@@ -9,6 +9,8 @@ use crate::graph::port::PortDirection;
 pub struct SerializedGraph {
     pub nodes: Vec<SerializedNode>,
     pub connections: Vec<SerializedConnection>,
+    #[serde(default)]
+    pub frames: Vec<SerializedFrame>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +38,13 @@ pub struct SerializedConnection {
     pub target_port: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializedFrame {
+    pub label: String,
+    pub color: [u8; 3],
+    pub member_node_ids: Vec<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeserializeError {
     OrphanedConnection { source_port: u32, target_port: u32 },
@@ -47,6 +56,7 @@ impl NodeGraph {
         use crate::graph::node::NodePosition;
         use crate::graph::port::{PortSocketType, PortLabel};
         use crate::graph::connection::ConnectionEndpoints;
+        use crate::graph::frame::{FrameLabel, FrameColor, FrameMembers, FrameRect};
 
         let mut nodes = Vec::new();
         for (node_id, header) in self.world.query::<NodeHeader>() {
@@ -93,7 +103,19 @@ impl NodeGraph {
             });
         }
 
-        SerializedGraph { nodes, connections }
+        let mut frames = Vec::new();
+        for (frame_id, _) in self.world.query::<FrameRect>() {
+            let label = self.world.get::<FrameLabel>(frame_id)
+                .map(|l| l.0.clone()).unwrap_or_default();
+            let color = self.world.get::<FrameColor>(frame_id)
+                .map(|c| c.0).unwrap_or([80, 80, 120]);
+            let member_node_ids = self.world.get::<FrameMembers>(frame_id)
+                .map(|m| m.0.iter().map(|id| id.index).collect())
+                .unwrap_or_default();
+            frames.push(SerializedFrame { label, color, member_node_ids });
+        }
+
+        SerializedGraph { nodes, connections, frames }
     }
 
     pub fn deserialize(data: &SerializedGraph) -> Result<Self, DeserializeError> {
@@ -135,6 +157,13 @@ impl NodeGraph {
                     });
                 }
             }
+        }
+
+        for sframe in &data.frames {
+            let members: Vec<EntityId> = sframe.member_node_ids.iter()
+                .filter_map(|old_id| id_map.get(old_id).copied())
+                .collect();
+            graph.add_frame(&sframe.label, sframe.color, &members);
         }
 
         Ok(graph)

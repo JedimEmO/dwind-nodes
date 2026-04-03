@@ -464,9 +464,49 @@ fn deserialization_orphaned_connection_returns_error() {
             source_port: 999,
             target_port: 888,
         }],
+        frames: vec![],
     };
     let result = NodeGraph::deserialize(&data);
     assert!(matches!(result, Err(crate::serialization::DeserializeError::OrphanedConnection { .. })));
+}
+
+#[test]
+fn serialization_roundtrip_frames_and_reroutes() {
+    use crate::graph::frame::{FrameRect, FrameLabel, FrameMembers};
+    use crate::graph::reroute::IsReroute;
+
+    let mut graph = NodeGraph::new();
+    let n1 = graph.add_node("A", (0.0, 0.0));
+    graph.add_port(n1, PortDirection::Output, SocketType::Float, "Out");
+    let n2 = graph.add_node("B", (200.0, 0.0));
+    graph.add_port(n2, PortDirection::Input, SocketType::Float, "In");
+
+    // Add a reroute
+    let reroute = graph.add_node("Reroute", (100.0, 0.0));
+    graph.add_port(reroute, PortDirection::Input, SocketType::Any, "");
+    graph.add_port(reroute, PortDirection::Output, SocketType::Any, "");
+    graph.world.insert(reroute, IsReroute);
+
+    // Add a frame around n1 and n2
+    graph.add_frame("My Frame", [255, 100, 50], &[n1, n2]);
+
+    // Roundtrip
+    let serialized = graph.serialize();
+    let json = serde_json::to_string(&serialized).unwrap();
+    let data: crate::serialization::SerializedGraph = serde_json::from_str(&json).unwrap();
+    let restored = NodeGraph::deserialize(&data).unwrap();
+
+    // Verify reroute marker survived
+    let reroute_count = restored.world.query::<IsReroute>().count();
+    assert_eq!(reroute_count, 1, "IsReroute should survive serialization roundtrip");
+
+    // Verify frame survived
+    assert_eq!(restored.frame_count(), 1, "Frame should survive serialization roundtrip");
+    let (fid, _) = restored.world.query::<FrameRect>().next().unwrap();
+    let label = restored.world.get::<FrameLabel>(fid).unwrap();
+    assert_eq!(label.0, "My Frame");
+    let members = restored.world.get::<FrameMembers>(fid).unwrap();
+    assert_eq!(members.0.len(), 2, "Frame should have 2 members after roundtrip");
 }
 
 // ============================================================

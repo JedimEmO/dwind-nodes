@@ -22,8 +22,11 @@ pub fn render_frame(frame_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     let bounds = gs.get_frame_bounds_signal(frame_id)
         .unwrap_or_else(|| Mutable::new((0.0, 0.0, 200.0, 100.0)));
 
+    let is_selected = gs.selected_frames.signal_cloned()
+        .map(move |sel| sel.contains(&frame_id))
+        .broadcast();
+
     svg!("g", {
-        // Frame background
         .child(svg!("rect", {
             .attr_signal("x", bounds.signal().map(|(x, _, _, _)| format!("{}", x)))
             .attr_signal("y", bounds.signal().map(|(_, y, _, _)| format!("{}", y)))
@@ -31,12 +34,19 @@ pub fn render_frame(frame_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
             .attr_signal("height", bounds.signal().map(|(_, _, _, h)| format!("{}", h)))
             .attr("rx", "8")
             .attr("fill", &format!("rgba({},{},{},0.15)", r, g, b))
-            .attr("stroke", &format!("rgba({},{},{},0.4)", r, g, b))
-            .attr("stroke-width", "1")
+            .attr_signal("stroke", is_selected.signal().map(move |sel| {
+                if sel {
+                    format!("rgba({},{},{},0.9)", r, g, b)
+                } else {
+                    format!("rgba({},{},{},0.4)", r, g, b)
+                }
+            }))
+            .attr_signal("stroke-width", is_selected.signal().map(|sel| {
+                if sel { "2" } else { "1" }
+            }))
             .attr("stroke-dasharray", "6,3")
         }))
 
-        // Frame title
         .child(svg!("foreignObject", {
             .attr_signal("x", bounds.signal().map(|(x, _, _, _)| format!("{}", x)))
             .attr_signal("y", bounds.signal().map(|(_, y, _, _)| format!("{}", y - 20.0)))

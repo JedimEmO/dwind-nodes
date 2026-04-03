@@ -43,6 +43,7 @@ pub struct GraphSignals {
     pub frame_bounds: Rc<RefCell<HashMap<EntityId, Mutable<(f64, f64, f64, f64)>>>>,
 
     pub selection: Mutable<Vec<EntityId>>,
+    pub selected_frames: Mutable<Vec<EntityId>>,
     pub pan: Mutable<(f64, f64)>,
     pub zoom: Mutable<f64>,
 
@@ -75,6 +76,7 @@ impl GraphSignals {
             node_headers: Rc::new(RefCell::new(HashMap::new())),
             frame_bounds: Rc::new(RefCell::new(HashMap::new())),
             selection: Mutable::new(Vec::new()),
+            selected_frames: Mutable::new(Vec::new()),
             pan: Mutable::new((0.0, 0.0)),
             zoom: Mutable::new(1.0),
             connecting_from: Mutable::new(None),
@@ -352,6 +354,14 @@ impl GraphSignals {
                     connections_may_have_changed = true;
                 }
                 SideEffect::ConnectionFailed => { self.connecting_from.set(None); }
+                SideEffect::FrameSelected(frame_id) => {
+                    self.selected_frames.set(vec![*frame_id]);
+                }
+                SideEffect::FrameDeselected => {
+                    if !self.selected_frames.get_cloned().is_empty() {
+                        self.selected_frames.set(Vec::new());
+                    }
+                }
             }
         }
 
@@ -459,10 +469,13 @@ impl GraphSignals {
     // ============================================================
 
     pub fn delete_selected(self: &Rc<Self>) {
-        let selected = self.selection.get_cloned();
-        if selected.is_empty() { return; }
+        let selected_nodes = self.selection.get_cloned();
+        let selected_frames = self.selected_frames.get_cloned();
+        if selected_nodes.is_empty() && selected_frames.is_empty() { return; }
         self.save_undo();
-        for &nid in &selected { self.with_graph_mut(|g| g.remove_node(nid)); }
+        for &nid in &selected_nodes { self.with_graph_mut(|g| g.remove_node(nid)); }
+        for &fid in &selected_frames { self.with_graph_mut(|g| g.remove_frame(fid)); }
+        self.selected_frames.set(Vec::new());
         self.full_sync();
     }
 
@@ -524,8 +537,11 @@ impl GraphSignals {
         {
             let editor = self.editor.borrow();
             let graph = editor.current_graph();
+            let node_set: std::collections::HashSet<EntityId> = nodes.iter().copied().collect();
             let mut positions = self.node_positions.borrow_mut();
             let mut headers = self.node_headers.borrow_mut();
+            positions.retain(|id, _| node_set.contains(id));
+            headers.retain(|id, _| node_set.contains(id));
             for &nid in &nodes {
                 let pos = graph.world.get::<NodePosition>(nid).map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
                 if let Some(m) = positions.get(&nid) { m.set(pos); } else { positions.insert(nid, Mutable::new(pos)); }
