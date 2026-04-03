@@ -123,7 +123,7 @@ impl GraphSignals {
     pub fn select_single(&self, node_id: EntityId) {
         self.controller.borrow_mut().selection.clear();
         self.controller.borrow_mut().selection.select(node_id);
-        self.selection.set(vec![node_id]);
+        self.sync_selection();
     }
 
     /// Snapshot the current editor state for undo. Call BEFORE mutating.
@@ -553,9 +553,30 @@ impl GraphSignals {
     // Sync
     // ============================================================
 
+    /// Delta-sync a MutableVec with a new set of live IDs.
+    /// Only removes dead entries and adds new ones — avoids clearing the entire list.
+    fn sync_entity_list(list: &MutableVec<EntityId>, live: &[EntityId]) {
+        let live_set: std::collections::HashSet<EntityId> = live.iter().copied().collect();
+        let current: Vec<EntityId> = list.lock_ref().iter().copied().collect();
+        let cur_set: std::collections::HashSet<EntityId> = current.iter().copied().collect();
+
+        if live_set == cur_set { return; }
+
+        let mut lock = list.lock_mut();
+        // Remove dead entries
+        let mut i = 0;
+        while i < lock.len() {
+            if !live_set.contains(&lock[i]) { lock.remove(i); } else { i += 1; }
+        }
+        // Add new entries
+        for &id in live {
+            if !cur_set.contains(&id) { lock.push_cloned(id); }
+        }
+    }
+
     fn full_sync(&self) {
         let nodes: Vec<EntityId> = self.with_graph(|g| g.world.query::<NodeHeader>().map(|(id, _)| id).collect());
-        { let mut l = self.node_list.lock_mut(); l.clear(); for &id in &nodes { l.push_cloned(id); } }
+        Self::sync_entity_list(&self.node_list, &nodes);
         {
             let editor = self.editor.borrow();
             let graph = editor.current_graph();
@@ -566,14 +587,19 @@ impl GraphSignals {
             headers.retain(|id, _| node_set.contains(id));
             for &nid in &nodes {
                 let pos = graph.world.get::<NodePosition>(nid).map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
-                if let Some(m) = positions.get(&nid) { m.set(pos); } else { positions.insert(nid, Mutable::new(pos)); }
+                if let Some(m) = positions.get(&nid) {
+                    if m.get() != pos { m.set(pos); }
+                } else { positions.insert(nid, Mutable::new(pos)); }
                 let h = graph.world.get::<NodeHeader>(nid).cloned()
                     .unwrap_or(NodeHeader { title: "?".into(), color: [100,100,100], collapsed: false });
-                if let Some(m) = headers.get(&nid) { m.set(h); } else { headers.insert(nid, Mutable::new(h)); }
+                if let Some(m) = headers.get(&nid) {
+                    let cur = m.get_cloned();
+                    if cur.title != h.title || cur.color != h.color || cur.collapsed != h.collapsed { m.set(h); }
+                } else { headers.insert(nid, Mutable::new(h)); }
             }
         }
-        { let conns: Vec<EntityId> = self.with_graph(|g| g.world.query::<ConnectionEndpoints>().map(|(id, _)| id).collect());
-          let mut l = self.connection_list.lock_mut(); l.clear(); for &id in &conns { l.push_cloned(id); } }
+        let conns: Vec<EntityId> = self.with_graph(|g| g.world.query::<ConnectionEndpoints>().map(|(id, _)| id).collect());
+        Self::sync_entity_list(&self.connection_list, &conns);
         {
             let editor = self.editor.borrow();
             let graph = editor.current_graph();
@@ -585,11 +611,13 @@ impl GraphSignals {
                 if let Some(members) = graph.world.get::<nodegraph_core::graph::frame::FrameMembers>(fid) {
                     let rect = layout::compute_frame_rect(graph, &members.0);
                     let val = (rect.x, rect.y, rect.w, rect.h);
-                    if let Some(m) = bounds.get(&fid) { m.set(val); } else { bounds.insert(fid, Mutable::new(val)); }
+                    if let Some(m) = bounds.get(&fid) {
+                        if m.get() != val { m.set(val); }
+                    } else { bounds.insert(fid, Mutable::new(val)); }
                 }
             }
             drop(editor);
-            let mut l = self.frame_list.lock_mut(); l.clear(); for &id in &frames { l.push_cloned(id); }
+            Self::sync_entity_list(&self.frame_list, &frames);
         }
         self.sync_selection();
         self.recompute_graph_bounds();

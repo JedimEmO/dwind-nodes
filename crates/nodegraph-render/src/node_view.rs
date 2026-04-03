@@ -52,7 +52,8 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
         return render_reroute(node_id, pos_signal, selection, &input_ports, &output_ports, gs);
     }
 
-    let num_rows = input_ports.len().max(output_ports.len());
+    let collapsed = header.collapsed;
+    let num_rows = if collapsed { 0 } else { input_ports.len().max(output_ports.len()) };
     let total_height = HEADER_HEIGHT + num_rows as f64 * PORT_HEIGHT;
     let [hr, hg, hb] = header.color;
 
@@ -162,18 +163,22 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
             }))
         }))
 
-        // SVG port circles — at exact layout coordinates (NOT affected by foreignObject)
-        .children(input_ports.iter().enumerate().map(|(i, &(pid, st, _, _))| {
-            let [cr, cg, cb] = st.default_color();
-            let cy = HEADER_HEIGHT + (i as f64 + 0.5) * PORT_HEIGHT;
-            render_port(pid, st, PortDirection::Input, 0.0, cy, cr, cg, cb, gs)
-        }).collect::<Vec<_>>())
+        // SVG port circles — hidden when collapsed
+        .children(if collapsed { vec![] } else {
+            input_ports.iter().enumerate().map(|(i, &(pid, st, _, _))| {
+                let [cr, cg, cb] = st.default_color();
+                let cy = HEADER_HEIGHT + (i as f64 + 0.5) * PORT_HEIGHT;
+                render_port(pid, st, PortDirection::Input, 0.0, cy, cr, cg, cb, gs)
+            }).collect::<Vec<_>>()
+        })
 
-        .children(output_ports.iter().enumerate().map(|(i, &(pid, st, _, _))| {
-            let [cr, cg, cb] = st.default_color();
-            let cy = HEADER_HEIGHT + (i as f64 + 0.5) * PORT_HEIGHT;
-            render_port(pid, st, PortDirection::Output, NODE_MIN_WIDTH, cy, cr, cg, cb, gs)
-        }).collect::<Vec<_>>())
+        .children(if collapsed { vec![] } else {
+            output_ports.iter().enumerate().map(|(i, &(pid, st, _, _))| {
+                let [cr, cg, cb] = st.default_color();
+                let cy = HEADER_HEIGHT + (i as f64 + 0.5) * PORT_HEIGHT;
+                render_port(pid, st, PortDirection::Output, NODE_MIN_WIDTH, cy, cr, cg, cb, gs)
+            }).collect::<Vec<_>>()
+        })
 
         // "Add port" button for Group IO nodes
         .apply(|b| if is_group_io {

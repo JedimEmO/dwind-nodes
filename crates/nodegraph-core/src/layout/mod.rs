@@ -73,8 +73,11 @@ pub struct ComputedNodeLayout {
 }
 
 pub fn compute_node_layout(graph: &NodeGraph, node_id: EntityId) -> Option<ComputedNodeLayout> {
+    use crate::graph::reroute::IsReroute;
+
     let pos = graph.world.get::<NodePosition>(node_id)?;
     let header = graph.world.get::<NodeHeader>(node_id)?;
+    let is_reroute = graph.world.get::<IsReroute>(node_id).is_some();
 
     let ports = graph.node_ports(node_id);
     let mut inputs: Vec<(EntityId, u32)> = Vec::new();
@@ -91,6 +94,25 @@ pub fn compute_node_layout(graph: &NodeGraph, node_id: EntityId) -> Option<Compu
 
     inputs.sort_by_key(|&(_, idx)| idx);
     outputs.sort_by_key(|&(_, idx)| idx);
+
+    // Reroute nodes: diamond centered at position, ports at edges
+    if is_reroute {
+        let size = REROUTE_SIZE * 2.0;
+        let total_rect = Rect::new(pos.x - REROUTE_SIZE, pos.y - REROUTE_SIZE, size, size);
+        let input_port_positions = inputs.iter().map(|&(pid, _)| {
+            (pid, Vec2::new(pos.x - REROUTE_SIZE, pos.y))
+        }).collect();
+        let output_port_positions = outputs.iter().map(|&(pid, _)| {
+            (pid, Vec2::new(pos.x + REROUTE_SIZE, pos.y))
+        }).collect();
+        return Some(ComputedNodeLayout {
+            header_rect: total_rect,
+            body_rect: total_rect,
+            total_rect,
+            input_port_positions,
+            output_port_positions,
+        });
+    }
 
     let num_rows = inputs.len().max(outputs.len());
     let body_height = if header.collapsed {

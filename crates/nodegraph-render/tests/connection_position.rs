@@ -2146,3 +2146,174 @@ async fn test_noodle_drop_search_menu_dom_filtered() {
         "DOM should NOT show Math Add for Shader source, got: {}", text);
 }
 
+// ============================================================
+// Polish: testing gaps
+// ============================================================
+
+#[wasm_bindgen_test]
+fn test_port_offset_exact_coordinates() {
+    use nodegraph_core::layout::{HEADER_HEIGHT, PORT_HEIGHT, NODE_MIN_WIDTH, REROUTE_SIZE};
+
+    // Two-node graph: Source at (100,100), Target at (400,100)
+    let (gs, n1, n2, out, inp) = new_two_node_graph();
+
+    // Output port on Source: x = node_x + NODE_MIN_WIDTH, y = node_y + HEADER_HEIGHT + 0.5 * PORT_HEIGHT
+    let out_pos = gs.port_world_pos(out).unwrap();
+    assert!((out_pos.x - (100.0 + NODE_MIN_WIDTH)).abs() < 0.01,
+        "Output port x={} should be {} (node_x + NODE_MIN_WIDTH)", out_pos.x, 100.0 + NODE_MIN_WIDTH);
+    assert!((out_pos.y - (100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT)).abs() < 0.01,
+        "Output port y={} should be {} (node_y + HEADER_HEIGHT + 0.5*PORT_HEIGHT)", out_pos.y, 100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT);
+
+    // Input port on Target: x = node_x (left edge), same y formula
+    let inp_pos = gs.port_world_pos(inp).unwrap();
+    assert!((inp_pos.x - 400.0).abs() < 0.01,
+        "Input port x={} should be 400.0 (node_x)", inp_pos.x);
+    assert!((inp_pos.y - (100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT)).abs() < 0.01,
+        "Input port y={} should be {}", inp_pos.y, 100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT);
+}
+
+#[wasm_bindgen_test]
+fn test_reroute_port_offset_exact() {
+    use nodegraph_core::layout::REROUTE_SIZE;
+
+    let (gs, _, _, _, _) = new_two_node_graph();
+    register_test_types(&gs);
+    gs.registry.borrow_mut().register(NodeTypeDefinition {
+        type_id: "reroute".into(), display_name: "Reroute".into(), category: "Utility".into(),
+        input_ports: vec![PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into() }],
+        output_ports: vec![PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into() }],
+    });
+    let _tc = render_sync(&gs);
+
+    gs.spawn_from_registry("reroute", (200.0, 200.0));
+
+    // Find reroute ports
+    let (r_input, r_output) = gs.with_graph(|g| {
+        let reroute_id = g.world.query::<nodegraph_core::graph::reroute::IsReroute>().next().unwrap().0;
+        let ports = g.node_ports(reroute_id).to_vec();
+        let inp = ports.iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
+        let out = ports.iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output)).copied().unwrap();
+        (inp, out)
+    });
+
+    let inp_pos = gs.port_world_pos(r_input).unwrap();
+    let out_pos = gs.port_world_pos(r_output).unwrap();
+
+    // Reroute at (200, 200): input at (200 - REROUTE_SIZE, 200), output at (200 + REROUTE_SIZE, 200)
+    assert!((inp_pos.x - (200.0 - REROUTE_SIZE)).abs() < 0.01,
+        "Reroute input x={} should be {}", inp_pos.x, 200.0 - REROUTE_SIZE);
+    assert!((inp_pos.y - 200.0).abs() < 0.01,
+        "Reroute input y={} should be 200.0", inp_pos.y);
+    assert!((out_pos.x - (200.0 + REROUTE_SIZE)).abs() < 0.01,
+        "Reroute output x={} should be {}", out_pos.x, 200.0 + REROUTE_SIZE);
+    assert!((out_pos.y - 200.0).abs() < 0.01,
+        "Reroute output y={} should be 200.0", out_pos.y);
+}
+
+#[wasm_bindgen_test]
+fn test_frame_undo_redo_cycle() {
+    let (gs, _, _, _, _) = new_two_node_graph();
+    let _tc = render_sync(&gs);
+
+    let n1 = gs.node_list.lock_ref()[0];
+    let n2 = gs.node_list.lock_ref()[1];
+
+    gs.controller.borrow_mut().selection.clear();
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.selection.set(vec![n1, n2]);
+    gs.create_frame_around_selected();
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 1);
+
+    // undo → redo → undo → redo cycle
+    gs.undo();
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 0, "After undo: no frames");
+    gs.redo();
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 1, "After redo: frame back");
+    gs.undo();
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 0, "After 2nd undo: no frames");
+    gs.redo();
+    assert_eq!(gs.with_graph(|g| g.frame_count()), 1, "After 2nd redo: frame back");
+    assert_eq!(gs.node_count(), 2, "Nodes intact after undo/redo cycle");
+}
+
+#[wasm_bindgen_test]
+fn test_connect_through_two_reroutes() {
+    let gs = GraphSignals::new();
+    let _tc = render_sync(&gs);
+
+    // Source(Float out) → R1(Any) → R2(Any) → Sink(Float in)
+    let src = gs.add_node("Src", (0.0, 0.0), vec![
+        (PortDirection::Output, SocketType::Float, "Out".to_string()),
+    ]);
+    let r1 = gs.add_node("R1", (100.0, 0.0), vec![
+        (PortDirection::Input, SocketType::Any, "".to_string()),
+        (PortDirection::Output, SocketType::Any, "".to_string()),
+    ]);
+    gs.with_graph_mut(|g| g.world.insert(r1, nodegraph_core::graph::reroute::IsReroute));
+    let r2 = gs.add_node("R2", (200.0, 0.0), vec![
+        (PortDirection::Input, SocketType::Any, "".to_string()),
+        (PortDirection::Output, SocketType::Any, "".to_string()),
+    ]);
+    gs.with_graph_mut(|g| g.world.insert(r2, nodegraph_core::graph::reroute::IsReroute));
+    let sink = gs.add_node("Sink", (300.0, 0.0), vec![
+        (PortDirection::Input, SocketType::Float, "In".to_string()),
+    ]);
+
+    // Get ports
+    let (src_out, r1_in, r1_out, r2_in, r2_out, sink_in) = gs.with_graph(|g| {
+        (g.node_ports(src)[0], g.node_ports(r1)[0], g.node_ports(r1)[1],
+         g.node_ports(r2)[0], g.node_ports(r2)[1], g.node_ports(sink)[0])
+    });
+
+    // Connect chain
+    gs.connect_ports(src_out, r1_in);
+    gs.connect_ports(r1_out, r2_in);
+    gs.connect_ports(r2_out, sink_in);
+
+    assert_eq!(gs.with_graph(|g| g.connection_count()), 3, "Should have 3 connections");
+    assert_eq!(gs.node_count(), 4);
+
+    // Delete R1 — should remove its 2 connections
+    gs.select_single(r1);
+    gs.delete_selected();
+    assert_eq!(gs.node_count(), 3, "R1 removed");
+    assert_eq!(gs.with_graph(|g| g.connection_count()), 1, "Only R2→Sink remains");
+
+    // Undo
+    gs.undo();
+    assert_eq!(gs.node_count(), 4, "R1 restored");
+    assert_eq!(gs.with_graph(|g| g.connection_count()), 3, "All connections restored");
+}
+
+#[wasm_bindgen_test]
+async fn test_collapsed_node_hides_ports_in_dom() {
+    // Create a graph with one collapsed node — it should render without port circles
+    let gs = GraphSignals::new();
+    let n = gs.add_node("Collapsed", (100.0, 100.0), vec![
+        (PortDirection::Input, SocketType::Float, "A".to_string()),
+        (PortDirection::Output, SocketType::Float, "B".to_string()),
+    ]);
+    // Collapse before rendering — update both graph and signal
+    gs.with_graph_mut(|g| {
+        if let Some(h) = g.world.get_mut::<nodegraph_core::graph::node::NodeHeader>(n) {
+            h.collapsed = true;
+        }
+    });
+    // Sync header signal so render_node sees collapsed=true
+    if let Some(sig) = gs.get_node_header_signal(n) {
+        let mut h = sig.get_cloned();
+        h.collapsed = true;
+        sig.set(h);
+    }
+
+    let _tc = render_sync(&gs);
+    let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+
+    // Collapsed node should have no port circles
+    let doc = web_sys::window().unwrap().document().unwrap();
+    let node_group = doc.query_selector("[data-node-id]").unwrap().unwrap();
+    let ports = node_group.query_selector_all("[data-port-id]").unwrap();
+    assert_eq!(ports.length(), 0, "Collapsed node should have 0 port circles, got {}", ports.length());
+}
