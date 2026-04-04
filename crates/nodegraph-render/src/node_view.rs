@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use dominator::{html, Dom, clone, svg, events, EventOptions};
 use futures_signals::signal::{Mutable, SignalExt};
+use futures_signals::signal_vec::SignalVecExt;
 use futures_signals::map_ref;
 
 use nodegraph_core::graph::node::{NodeHeader, MuteState};
@@ -60,7 +61,9 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
 
     let collapsed = header.collapsed;
     let num_rows = if collapsed { 0 } else { input_ports.len().max(output_ports.len()) };
-    let total_height = HEADER_HEIGHT + num_rows as f64 * PORT_HEIGHT;
+    let has_custom_body = gs.custom_node_body.borrow().is_some();
+    let custom_body_height = if has_custom_body { PORT_HEIGHT } else { 0.0 };
+    let total_height = HEADER_HEIGHT + num_rows as f64 * PORT_HEIGHT + custom_body_height;
     let [hr, hg, hb] = header.color;
 
     svg!("g", {
@@ -131,7 +134,7 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                 // Header
                 .child(html!("div", {
                     .style("height", &format!("{}px", HEADER_HEIGHT))
-                    .style("padding", "0 12px")
+                    .style("padding", &format!("0 {}px", PORT_RADIUS + 8.0))
                     .style("display", "flex")
                     .style("align-items", "center")
                     .style("color", gs.theme.header_text)
@@ -145,27 +148,91 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                 }))
 
                 // Port rows
-                .children((0..num_rows).map(|i| {
-                    let input_label = input_ports.get(i).map(|(_, _, l, _)| l.clone());
-                    let output_label = output_ports.get(i).map(|(_, _, l, _)| l.clone());
-                    html!("div", {
-                        .style("height", &format!("{}px", PORT_HEIGHT))
-                        .style("display", "flex")
-                        .style("justify-content", "space-between")
-                        .style("align-items", "center")
-                        .style("padding", &format!("0 {}px", PORT_RADIUS + 8.0))
-                        .style("box-sizing", "border-box")
-                        .style("font-size", "10px")
-                        .style("color", gs.theme.port_label_text)
+                .children({
+                    let port_widget = gs.port_widget.borrow().clone();
+                    (0..num_rows).map(|i| {
+                        let input_info = input_ports.get(i).map(|(pid, st, l, _)| (*pid, *st, l.clone()));
+                        let output_info = output_ports.get(i).map(|(pid, st, l, _)| (*pid, *st, l.clone()));
+                        let input_label = input_info.as_ref().map(|(_, _, l)| l.clone()).unwrap_or_default();
+                        let output_label = output_info.as_ref().map(|(_, _, l)| l.clone()).unwrap_or_default();
 
-                        .child(html!("span", {
-                            .text(&input_label.unwrap_or_default())
-                        }))
-                        .child(html!("span", {
-                            .text(&output_label.unwrap_or_default())
-                        }))
-                    })
-                }).collect::<Vec<_>>())
+                        html!("div", {
+                            .style("height", &format!("{}px", PORT_HEIGHT))
+                            .style("display", "flex")
+                            .style("justify-content", "space-between")
+                            .style("align-items", "center")
+                            .style("padding", &format!("0 {}px", PORT_RADIUS + 8.0))
+                            .style("box-sizing", "border-box")
+                            .style("font-size", "10px")
+                            .style("color", gs.theme.port_label_text)
+                            .style("gap", "3px")
+
+                            // Left side: input label + input widget
+                            .child(html!("span", {
+                                .style("flex-shrink", "0")
+                                .text(&input_label)
+                            }))
+                            .child_signal({
+                                let port_widget = port_widget.clone();
+                                let input_info = input_info.clone();
+                                let gs = gs.clone();
+                                gs.connection_list.signal_vec_cloned()
+                                    .to_signal_cloned()
+                                    .map(move |_| {
+                                        input_info.as_ref().and_then(|(pid, st, _)| {
+                                            let pw = port_widget.as_ref()?;
+                                            let is_connected = gs.with_graph(|g| !g.port_connections(*pid).is_empty());
+                                            pw(node_id, *pid, *st, is_connected, &gs)
+                                        }).map(|dom| html!("div", {
+                                            .style("width", "50px")
+                                            .style("flex-shrink", "0")
+                                            .child(dom)
+                                        }))
+                                    })
+                            })
+
+                            // Spacer
+                            .child(html!("span", { .style("flex", "1") }))
+
+                            // Right side: output widget + output label
+                            .child_signal({
+                                let port_widget = port_widget.clone();
+                                let output_info = output_info.clone();
+                                let gs = gs.clone();
+                                gs.connection_list.signal_vec_cloned()
+                                    .to_signal_cloned()
+                                    .map(move |_| {
+                                        output_info.as_ref().and_then(|(pid, st, _)| {
+                                            let pw = port_widget.as_ref()?;
+                                            let is_connected = gs.with_graph(|g| !g.port_connections(*pid).is_empty());
+                                            pw(node_id, *pid, *st, is_connected, &gs)
+                                        }).map(|dom| html!("div", {
+                                            .style("width", "50px")
+                                            .style("flex-shrink", "0")
+                                            .child(dom)
+                                        }))
+                                    })
+                            })
+                            .child(html!("span", {
+                                .style("flex-shrink", "0")
+                                .text(&output_label)
+                            }))
+                        })
+                    }).collect::<Vec<_>>()
+                })
+
+                // Custom node body — user-defined content inside the node
+                .apply({
+                    let custom = gs.custom_node_body.borrow().clone();
+                    move |b| {
+                        if let Some(renderer) = custom {
+                            if let Some(dom) = renderer(node_id, gs) {
+                                return b.child(dom);
+                            }
+                        }
+                        b
+                    }
+                })
             }))
         }))
 

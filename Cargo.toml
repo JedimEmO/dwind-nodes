@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "examples/*"]
 resolver = "2"
 
 [workspace.package]
@@ -19,3 +19,5 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
 console_error_panic_hook = "0.1"
+futures-signals-component-macro = "0.2"
+nodegraph-widgets = { path = "crates/nodegraph-widgets" }

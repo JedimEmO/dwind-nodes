@@ -96,6 +96,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec182b0ca2f35d8fc196cf3404988fd8b8c739a4d270ff118a398feb0cbec1ca"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "cssparser"
 version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -283,6 +292,18 @@ dependencies = [
  "log",
  "pin-project",
  "serde",
+]
+
+[[package]]
+name = "futures-signals-component-macro"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43b3b42ed61ec3de1e701712b4ec462957256ad2871eb614687a5365c8902c55"
+dependencies = [
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -490,6 +511,19 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
+ "web-sys",
+]
+
+[[package]]
+name = "nodegraph-widgets"
+version = "0.1.0"
+dependencies = [
+ "dominator",
+ "dwind",
+ "dwind-macros",
+ "futures-signals",
+ "futures-signals-component-macro",
+ "wasm-bindgen",
  "web-sys",
 ]
 
@@ -771,10 +805,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "trivial-calculator"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "dominator",
+ "dwind",
+ "futures-signals",
+ "nodegraph-core",
+ "nodegraph-render",
+ "nodegraph-widgets",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c"
 
 [[package]]
 name = "unicode-xid"

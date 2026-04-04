@@ -17,7 +17,17 @@ use nodegraph_core::search::NodeTypeRegistry;
 use nodegraph_core::store::EntityId;
 use nodegraph_core::types::socket_type::SocketType;
 
+use dominator::Dom;
 use crate::theme::Theme;
+
+/// User-provided callback to render custom content inside a node body.
+/// Returns `Some(Dom)` to add content below port rows, or `None` to skip.
+pub type CustomNodeBodyFn = dyn Fn(EntityId, &Rc<GraphSignals>) -> Option<Dom>;
+
+/// User-provided callback to render inline widgets on input port rows.
+/// Args: (node_id, port_id, socket_type, is_connected, gs).
+/// Returns `Some(Dom)` to insert a widget after the port label, or `None` to skip.
+pub type PortWidgetFn = dyn Fn(EntityId, EntityId, SocketType, bool, &Rc<GraphSignals>) -> Option<Dom>;
 
 pub const ATTR_NODE_ID: &str = "data-node-id";
 pub const ATTR_PORT_ID: &str = "data-port-id";
@@ -65,6 +75,8 @@ pub struct GraphSignals {
     pub breadcrumb: MutableVec<(EntityId, String)>,
 
     pub theme: Rc<Theme>,
+    pub custom_node_body: Rc<RefCell<Option<Rc<CustomNodeBodyFn>>>>,
+    pub port_widget: Rc<RefCell<Option<Rc<PortWidgetFn>>>>,
     pub graph_bounds: Mutable<(f64, f64, f64, f64)>,
     pub viewport_size: Mutable<(f64, f64)>,
 }
@@ -100,6 +112,8 @@ impl GraphSignals {
             breadcrumb: MutableVec::new_with_values(vec![(root_id, "Root".to_string())]),
             last_synced_graph: std::cell::Cell::new(Some(root_id)),
             theme: Theme::dark(),
+            custom_node_body: Rc::new(RefCell::new(None)),
+            port_widget: Rc::new(RefCell::new(None)),
             graph_bounds: Mutable::new((0.0, 0.0, 800.0, 600.0)),
             viewport_size: Mutable::new((800.0, 600.0)),
         })

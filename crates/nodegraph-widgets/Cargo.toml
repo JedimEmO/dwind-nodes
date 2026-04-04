@@ -1,0 +1,13 @@
+[package]
+name = "nodegraph-widgets"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dominator = { workspace = true }
+dwind = { workspace = true }
+dwind-macros = { workspace = true }
+futures-signals = { workspace = true }
+futures-signals-component-macro = { workspace = true }
+wasm-bindgen = { workspace = true }
+web-sys = { workspace = true }
