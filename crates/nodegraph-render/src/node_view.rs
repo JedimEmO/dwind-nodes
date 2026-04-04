@@ -150,6 +150,10 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                 // Port rows
                 .children({
                     let port_widget = gs.port_widget.borrow().clone();
+                    let node_type_id: String = gs.with_graph(|g| {
+                        g.world.get::<nodegraph_core::graph::node::NodeTypeId>(node_id)
+                            .map(|t| t.0.clone()).unwrap_or_default()
+                    });
                     (0..num_rows).map(|i| {
                         let input_info = input_ports.get(i).map(|(pid, st, l, _)| (*pid, *st, l.clone()));
                         let output_info = output_ports.get(i).map(|(pid, st, l, _)| (*pid, *st, l.clone()));
@@ -176,13 +180,14 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                                 let port_widget = port_widget.clone();
                                 let input_info = input_info.clone();
                                 let gs = gs.clone();
+                                let nti = node_type_id.clone();
                                 gs.connection_list.signal_vec_cloned()
                                     .to_signal_cloned()
                                     .map(move |_| {
                                         input_info.as_ref().and_then(|(pid, st, _)| {
                                             let pw = port_widget.as_ref()?;
                                             let is_connected = gs.with_graph(|g| !g.port_connections(*pid).is_empty());
-                                            pw(node_id, *pid, *st, is_connected, &gs)
+                                            pw(node_id, *pid, *st, PortDirection::Input, &nti, is_connected, &gs)
                                         }).map(|dom| html!("div", {
                                             .style("width", "50px")
                                             .style("flex-shrink", "0")
@@ -199,13 +204,14 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                                 let port_widget = port_widget.clone();
                                 let output_info = output_info.clone();
                                 let gs = gs.clone();
+                                let nti = node_type_id.clone();
                                 gs.connection_list.signal_vec_cloned()
                                     .to_signal_cloned()
                                     .map(move |_| {
                                         output_info.as_ref().and_then(|(pid, st, _)| {
                                             let pw = port_widget.as_ref()?;
                                             let is_connected = gs.with_graph(|g| !g.port_connections(*pid).is_empty());
-                                            pw(node_id, *pid, *st, is_connected, &gs)
+                                            pw(node_id, *pid, *st, PortDirection::Output, &nti, is_connected, &gs)
                                         }).map(|dom| html!("div", {
                                             .style("width", "50px")
                                             .style("flex-shrink", "0")

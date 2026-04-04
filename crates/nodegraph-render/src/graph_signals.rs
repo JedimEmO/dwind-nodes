@@ -24,10 +24,10 @@ use crate::theme::Theme;
 /// Returns `Some(Dom)` to add content below port rows, or `None` to skip.
 pub type CustomNodeBodyFn = dyn Fn(EntityId, &Rc<GraphSignals>) -> Option<Dom>;
 
-/// User-provided callback to render inline widgets on input port rows.
-/// Args: (node_id, port_id, socket_type, is_connected, gs).
+/// User-provided callback to render inline widgets on port rows.
+/// Args: (node_id, port_id, socket_type, port_direction, node_type_id, is_connected, gs).
 /// Returns `Some(Dom)` to insert a widget after the port label, or `None` to skip.
-pub type PortWidgetFn = dyn Fn(EntityId, EntityId, SocketType, bool, &Rc<GraphSignals>) -> Option<Dom>;
+pub type PortWidgetFn = dyn Fn(EntityId, EntityId, SocketType, PortDirection, &str, bool, &Rc<GraphSignals>) -> Option<Dom>;
 
 pub const ATTR_NODE_ID: &str = "data-node-id";
 pub const ATTR_PORT_ID: &str = "data-port-id";
@@ -152,18 +152,20 @@ impl GraphSignals {
     // Node/connection operations (all undoable via snapshot)
     // ============================================================
 
-    pub fn add_node(&self, title: &str, position: (f64, f64), ports: Vec<(PortDirection, SocketType, String)>) -> EntityId {
-        let node_id = self.with_graph_mut(|graph| {
+    pub fn add_node(&self, title: &str, position: (f64, f64), ports: Vec<(PortDirection, SocketType, String)>) -> (EntityId, Vec<EntityId>) {
+        let (node_id, port_ids) = self.with_graph_mut(|graph| {
             let nid = graph.add_node(title, position);
-            for (dir, st, label) in &ports { graph.add_port(nid, *dir, *st, label); }
-            nid
+            let pids: Vec<EntityId> = ports.iter()
+                .map(|(dir, st, label)| graph.add_port(nid, *dir, *st, label))
+                .collect();
+            (nid, pids)
         });
         let header = self.with_graph(|g| g.world.get::<NodeHeader>(node_id).cloned()
             .unwrap_or(NodeHeader { title: title.to_string(), color: [100,100,100], collapsed: false }));
         self.node_positions.borrow_mut().insert(node_id, Mutable::new(position));
         self.node_headers.borrow_mut().insert(node_id, Mutable::new(header));
         self.node_list.lock_mut().push_cloned(node_id);
-        node_id
+        (node_id, port_ids)
     }
 
     pub fn spawn_from_registry(&self, type_id: &str, position: (f64, f64)) {
@@ -185,7 +187,12 @@ impl GraphSignals {
 
         self.save_undo();
         let type_id_owned = def.type_id.clone();
-        let node_id = self.add_node(&def.display_name, position, all_ports);
+        let (node_id, new_ports) = self.add_node(&def.display_name, position, all_ports);
+
+        // Store type_id on the node for type dispatch
+        self.with_graph_mut(|g| {
+            g.world.insert(node_id, nodegraph_core::graph::node::NodeTypeId(type_id_owned.clone()));
+        });
 
         // Mark reroute nodes
         if type_id_owned == "reroute" {
@@ -195,7 +202,6 @@ impl GraphSignals {
         }
 
         if let Some((src_port, src_type, from_output)) = self.pending_connection.get() {
-            let new_ports = self.with_graph(|g| g.node_ports(node_id).to_vec());
             for &pid in &new_ports {
                 let info = self.with_graph(|g| {
                     (g.world.get::<PortDirection>(pid).copied(),
@@ -213,17 +219,21 @@ impl GraphSignals {
         self.search_menu.set(None);
     }
 
-    pub fn connect_ports(&self, source: EntityId, target: EntityId) -> Option<EntityId> {
+    pub fn connect_ports(&self, source: EntityId, target: EntityId) -> Result<EntityId, nodegraph_core::graph::ConnectionError> {
         self.save_undo();
-        self.connect_ports_no_undo(source, target)
+        self.connect_ports_inner(source, target)
     }
 
     fn connect_ports_no_undo(&self, source: EntityId, target: EntityId) -> Option<EntityId> {
-        let conn_id = self.with_graph_mut(|g| g.connect(source, target).ok())?;
+        self.connect_ports_inner(source, target).ok()
+    }
+
+    fn connect_ports_inner(&self, source: EntityId, target: EntityId) -> Result<EntityId, nodegraph_core::graph::ConnectionError> {
+        let conn_id = self.with_graph_mut(|g| g.connect(source, target))?;
         self.connection_list.lock_mut().push_cloned(conn_id);
         self.reconcile_connections();
         self.adapt_io_ports_after_connect(source, target);
-        Some(conn_id)
+        Ok(conn_id)
     }
 
     pub fn port_world_pos(&self, port_id: EntityId) -> Option<Vec2> {

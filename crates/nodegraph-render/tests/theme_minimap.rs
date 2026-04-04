@@ -81,7 +81,7 @@ fn test_canvas_uses_theme_bg() {
 #[wasm_bindgen_test]
 async fn test_node_uses_theme_colors() {
     let gs = GraphSignals::new();
-    let _n = gs.add_node("Test", (100.0, 100.0), vec![
+    let (_n, _) = gs.add_node("Test", (100.0, 100.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
     let _tc = render_sync(&gs);
@@ -103,7 +103,7 @@ async fn test_node_uses_theme_colors() {
 #[wasm_bindgen_test]
 async fn test_minimap_container_exists() {
     let gs = GraphSignals::new();
-    gs.add_node("A", (0.0, 0.0), vec![]);
+    (gs.add_node("A", (0.0, 0.0), vec![])).0;
     let _tc = render_sync(&gs);
     flush_microtasks().await;
 
@@ -115,7 +115,7 @@ async fn test_minimap_container_exists() {
 #[wasm_bindgen_test]
 async fn test_minimap_viewport_rect_exists() {
     let gs = GraphSignals::new();
-    gs.add_node("A", (0.0, 0.0), vec![]);
+    (gs.add_node("A", (0.0, 0.0), vec![])).0;
     let _tc = render_sync(&gs);
     flush_microtasks().await;
 
@@ -127,10 +127,10 @@ async fn test_minimap_viewport_rect_exists() {
 #[wasm_bindgen_test]
 async fn test_minimap_has_node_rects() {
     let gs = GraphSignals::new();
-    gs.add_node("A", (0.0, 0.0), vec![
+    let _ = gs.add_node("A", (0.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
-    gs.add_node("B", (300.0, 200.0), vec![
+    let _ = gs.add_node("B", (300.0, 200.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
     let _tc = render_sync(&gs);
@@ -147,14 +147,14 @@ async fn test_minimap_has_node_rects() {
 #[wasm_bindgen_test]
 async fn test_minimap_connection_lines() {
     let gs = GraphSignals::new();
-    let n1 = gs.add_node("A", (0.0, 0.0), vec![
+    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n2 = gs.add_node("B", (300.0, 200.0), vec![
+    let (n2, _) = gs.add_node("B", (300.0, 200.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
     let (out, inp) = gs.with_graph(|g| (g.node_ports(n1)[0], g.node_ports(n2)[0]));
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
     let _tc = render_sync(&gs);
     flush_microtasks().await;
 

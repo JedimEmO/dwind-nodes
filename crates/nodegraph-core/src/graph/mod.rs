@@ -271,6 +271,62 @@ impl NodeGraph {
         self.world.query::<NodeHeader>().count()
     }
 
+    /// Topological sort of all nodes. Returns nodes in dependency order
+    /// (sources first, sinks last). Returns Err with cycle participants if cycles exist.
+    pub fn topological_sort(&self) -> Result<Vec<EntityId>, Vec<EntityId>> {
+        use std::collections::{HashMap, VecDeque};
+
+        let all_nodes: Vec<EntityId> = self.world.query::<NodeHeader>().map(|(id, _)| id).collect();
+        let mut in_degree: HashMap<EntityId, usize> = all_nodes.iter().map(|&id| (id, 0)).collect();
+        let mut adjacency: HashMap<EntityId, Vec<EntityId>> = all_nodes.iter().map(|&id| (id, Vec::new())).collect();
+
+        // Build dependency graph from connections
+        for (_, ep) in self.world.query::<ConnectionEndpoints>() {
+            let src_node = self.world.get::<PortOwner>(ep.source_port).map(|o| o.0);
+            let tgt_node = self.world.get::<PortOwner>(ep.target_port).map(|o| o.0);
+            if let (Some(src), Some(tgt)) = (src_node, tgt_node) {
+                if src != tgt {
+                    adjacency.entry(src).or_default().push(tgt);
+                    *in_degree.entry(tgt).or_default() += 1;
+                }
+            }
+        }
+
+        // Kahn's algorithm
+        let mut queue: VecDeque<EntityId> = in_degree.iter()
+            .filter(|(_, &deg)| deg == 0)
+            .map(|(&id, _)| id)
+            .collect();
+        let mut sorted = Vec::with_capacity(all_nodes.len());
+
+        while let Some(node) = queue.pop_front() {
+            sorted.push(node);
+            if let Some(neighbors) = adjacency.get(&node) {
+                for &neighbor in neighbors {
+                    if let Some(deg) = in_degree.get_mut(&neighbor) {
+                        *deg -= 1;
+                        if *deg == 0 { queue.push_back(neighbor); }
+                    }
+                }
+            }
+        }
+
+        if sorted.len() == all_nodes.len() {
+            Ok(sorted)
+        } else {
+            let cycle_nodes: Vec<EntityId> = in_degree.iter()
+                .filter(|(_, &deg)| deg > 0)
+                .map(|(&id, _)| id)
+                .collect();
+            Err(cycle_nodes)
+        }
+    }
+
+    /// Convenience: nodes in evaluation order. Returns empty if cycles exist.
+    pub fn eval_order(&self) -> Vec<EntityId> {
+        self.topological_sort().unwrap_or_default()
+    }
+
     /// Create a frame around the given nodes. Computes bounding rect with padding.
     pub fn add_frame(&mut self, label: &str, color: [u8; 3], member_ids: &[EntityId]) -> EntityId {
         use frame::{FrameLabel, FrameColor, FrameRect, FrameMembers};

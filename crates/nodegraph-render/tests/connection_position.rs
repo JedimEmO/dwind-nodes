@@ -20,10 +20,10 @@ use nodegraph_render::viewport_view::render_graph_editor;
 
 fn new_two_node_graph() -> (std::rc::Rc<GraphSignals>, EntityId, EntityId, EntityId, EntityId) {
     let gs = GraphSignals::new();
-    let n1 = gs.add_node("Source", (100.0, 100.0), vec![
+    let (n1, _) = gs.add_node("Source", (100.0, 100.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n2 = gs.add_node("Target", (400.0, 100.0), vec![
+    let (n2, _) = gs.add_node("Target", (400.0, 100.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
     let (out, inp) = gs.with_graph(|graph| {
@@ -81,7 +81,7 @@ fn render_sync(gs: &std::rc::Rc<GraphSignals>) -> TestContainer {
 fn test_port_world_pos_from_graph_state() {
     // Port positions are computed purely from graph state — no DOM needed
     let (gs, _, _, out, inp) = new_two_node_graph();
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
 
     // No render needed — port_world_pos is a pure function of graph data
     let out_pos = gs.port_world_pos(out).unwrap();
@@ -98,7 +98,7 @@ fn test_port_world_pos_from_graph_state() {
 #[wasm_bindgen_test]
 fn test_port_world_pos_reasonable() {
     let (gs, _, _, out, inp) = new_two_node_graph();
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
     let _tc = render_sync(&gs);
 
     // Output port on Source (at x=100): should be near right edge of node
@@ -119,7 +119,7 @@ fn test_connection_endpoints_computable() {
     // Verify that after connecting, we can compute both port world positions
     // and produce a valid bezier path — all from data, no DOM needed.
     let (gs, _, _, out, inp) = new_two_node_graph();
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
     let _tc = render_sync(&gs);
 
     let out_pos = gs.port_world_pos(out).unwrap();
@@ -145,7 +145,7 @@ fn test_connection_endpoints_computable() {
 #[wasm_bindgen_test]
 fn test_drag_updates_connection_reactively() {
     let (gs, n1, _, out, inp) = new_two_node_graph();
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
     let _tc = render_sync(&gs);
 
     // Read the output port's world position before move
@@ -242,23 +242,23 @@ fn test_compatible_connection_succeeds() {
     let (gs, _, _, out, inp) = new_two_node_graph();
     let _tc = render_sync(&gs);
 
-    assert!(gs.connect_ports(out, inp).is_some());
+    assert!(gs.connect_ports(out, inp).is_ok());
     assert_eq!(gs.connection_count(), 1);
 }
 
 #[wasm_bindgen_test]
 fn test_incompatible_connection_rejected() {
     let gs = GraphSignals::new();
-    let n1 = gs.add_node("A", (0.0, 0.0), vec![
+    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Shader, "Out".to_string()),
     ]);
-    let n2 = gs.add_node("B", (200.0, 0.0), vec![
+    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
         (PortDirection::Input, SocketType::Geometry, "In".to_string()),
     ]);
     let (out, inp) = gs.with_graph(|g| (g.node_ports(n1)[0], g.node_ports(n2)[0]));
     let _tc = render_sync(&gs);
 
-    assert!(gs.connect_ports(out, inp).is_none());
+    assert!(gs.connect_ports(out, inp).is_err());
     assert_eq!(gs.connection_count(), 0);
 }
 
@@ -269,7 +269,7 @@ fn test_incompatible_connection_rejected() {
 #[wasm_bindgen_test]
 fn test_delete_node_removes_its_connections() {
     let (gs, n1, _, out, inp) = new_two_node_graph();
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
     let _tc = render_sync(&gs);
 
     assert_eq!(gs.connection_count(), 1);
@@ -394,10 +394,10 @@ fn test_full_drag_to_connect_cycle() {
 #[wasm_bindgen_test]
 fn test_drag_to_connect_incompatible_rejected() {
     let gs = GraphSignals::new();
-    let n1 = gs.add_node("A", (0.0, 0.0), vec![
+    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Shader, "Out".to_string()),
     ]);
-    let n2 = gs.add_node("B", (300.0, 0.0), vec![
+    let (n2, _) = gs.add_node("B", (300.0, 0.0), vec![
         (PortDirection::Input, SocketType::Geometry, "In".to_string()),
     ]);
     let (out, inp) = gs.with_graph(|g| (g.node_ports(n1)[0], g.node_ports(n2)[0]));
@@ -447,7 +447,7 @@ fn test_drag_to_connect_release_on_empty() {
 #[wasm_bindgen_test]
 fn test_port_position_changes_after_node_move() {
     let (gs, n1, _, out, inp) = new_two_node_graph();
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
     let _tc = render_sync(&gs);
 
     let pos_before = gs.port_world_pos(out).unwrap();
@@ -473,7 +473,7 @@ fn test_port_position_changes_after_node_move() {
 #[wasm_bindgen_test]
 fn test_connection_svg_removed_after_delete() {
     let (gs, n1, _, out, inp) = new_two_node_graph();
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
     let _tc = render_sync(&gs);
 
     // Count connection-related SVG paths before
@@ -535,7 +535,7 @@ fn test_preview_wire_lifecycle() {
 #[wasm_bindgen_test]
 fn test_undo_redo_with_connections() {
     let (gs, n1, _, out, inp) = new_two_node_graph();
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
     let _tc = render_sync(&gs);
 
     assert_eq!(gs.node_count(), 2);
@@ -607,7 +607,7 @@ fn test_box_selection_selects_contained_nodes() {
 #[wasm_bindgen_test]
 fn test_cut_links() {
     let (gs, _, _, out, inp) = new_two_node_graph();
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
     let _tc = render_sync(&gs);
 
     assert_eq!(gs.connection_count(), 1);
@@ -655,21 +655,21 @@ fn test_cut_links() {
 #[wasm_bindgen_test]
 fn test_multiple_connections_from_output() {
     let gs = GraphSignals::new();
-    let mc_n1 = gs.add_node("Src", (0.0, 0.0), vec![
+    let (mc_n1, _) = gs.add_node("Src", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let mc_n2 = gs.add_node("Tgt1", (200.0, 0.0), vec![
+    let (mc_n2, _) = gs.add_node("Tgt1", (200.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
-    let mc_n3 = gs.add_node("Tgt2", (200.0, 100.0), vec![
+    let (mc_n3, _) = gs.add_node("Tgt2", (200.0, 100.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
     let (out, in1, in2) = gs.with_graph(|g| (g.node_ports(mc_n1)[0], g.node_ports(mc_n2)[0], g.node_ports(mc_n3)[0]));
 
     let _tc = render_sync(&gs);
 
-    gs.connect_ports(out, in1);
-    gs.connect_ports(out, in2);
+    gs.connect_ports(out, in1).unwrap();
+    gs.connect_ports(out, in2).unwrap();
 
     assert_eq!(gs.connection_count(), 2);
     assert_eq!(gs.connection_list.lock_ref().len(), 2);
@@ -682,24 +682,24 @@ fn test_multiple_connections_from_output() {
 #[wasm_bindgen_test]
 fn test_replacing_input_connection() {
     let gs = GraphSignals::new();
-    let n1 = gs.add_node("A", (0.0, 0.0), vec![
+    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n2 = gs.add_node("B", (0.0, 100.0), vec![
+    let (n2, _) = gs.add_node("B", (0.0, 100.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n3 = gs.add_node("C", (200.0, 50.0), vec![
+    let (n3, _) = gs.add_node("C", (200.0, 50.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
     let (out1, out2, inp) = gs.with_graph(|g| (g.node_ports(n1)[0], g.node_ports(n2)[0], g.node_ports(n3)[0]));
 
     let _tc = render_sync(&gs);
 
-    gs.connect_ports(out1, inp);
+    gs.connect_ports(out1, inp).unwrap();
     assert_eq!(gs.connection_count(), 1);
 
     // Connecting out2 to the same input should replace
-    gs.connect_ports(out2, inp);
+    gs.connect_ports(out2, inp).unwrap();
     assert_eq!(gs.connection_count(), 1, "Old connection should be replaced");
 }
 
@@ -838,14 +838,14 @@ fn test_spawn_incompatible_no_auto_connect() {
 
 fn setup_three_node_chain() -> (std::rc::Rc<GraphSignals>, EntityId, EntityId, EntityId) {
     let gs = GraphSignals::new();
-    let n1 = gs.add_node("A", (0.0, 0.0), vec![
+    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n2 = gs.add_node("B", (200.0, 0.0), vec![
+    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n3 = gs.add_node("C", (400.0, 0.0), vec![
+    let (n3, _) = gs.add_node("C", (400.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
 
@@ -857,7 +857,7 @@ fn setup_three_node_chain() -> (std::rc::Rc<GraphSignals>, EntityId, EntityId, E
         let in_b = b_ports.iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
         (out_a, in_b)
     });
-    gs.connect_ports(out_a, in_b);
+    gs.connect_ports(out_a, in_b).unwrap();
 
     let (out_b, in_c) = gs.with_graph(|g| {
         let b_ports = g.node_ports(n2);
@@ -866,7 +866,7 @@ fn setup_three_node_chain() -> (std::rc::Rc<GraphSignals>, EntityId, EntityId, E
         let in_c = c_ports.iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
         (out_b, in_c)
     });
-    gs.connect_ports(out_b, in_c);
+    gs.connect_ports(out_b, in_c).unwrap();
 
     (gs, n1, n2, n3)
 }
@@ -1045,14 +1045,14 @@ fn test_group_io_node_type_adapts() {
     let new_io_port = new_io_port.unwrap();
 
     // Create a Color node inside the subgraph
-    let color_node = gs.add_node("ColorSink", (100.0, 100.0), vec![
+    let (color_node, _) = gs.add_node("ColorSink", (100.0, 100.0), vec![
         (PortDirection::Input, SocketType::Color, "Color".to_string()),
     ]);
     let color_in = gs.with_graph(|g| g.node_ports(color_node)[0]);
 
     // Connect IO node's Any output → Color node's Color input
     let conn = gs.connect_ports(new_io_port, color_in);
-    assert!(conn.is_some(), "Connection from IO Any output to Color input should succeed");
+    assert!(conn.is_ok(), "Connection from IO Any output to Color input should succeed");
 
     // The IO port should now be Color type
     let adapted_type = gs.with_graph(|g| {
@@ -1065,18 +1065,18 @@ fn test_group_io_node_type_adapts() {
 #[wasm_bindgen_test]
 fn test_nested_groups() {
     let gs = GraphSignals::new();
-    let n1 = gs.add_node("A", (0.0, 0.0), vec![
+    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n2 = gs.add_node("B", (200.0, 0.0), vec![
+    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n3 = gs.add_node("C", (400.0, 0.0), vec![
+    let (n3, _) = gs.add_node("C", (400.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n4 = gs.add_node("D", (600.0, 0.0), vec![
+    let (n4, _) = gs.add_node("D", (600.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
     let _tc = render_sync(&gs);
@@ -1274,7 +1274,7 @@ fn test_undo_connect() {
     let _tc = render_sync(&gs);
     assert_eq!(gs.connection_count(), 0);
 
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
     assert_eq!(gs.connection_count(), 1);
 
     gs.undo();
@@ -1438,18 +1438,18 @@ fn test_group_a_group_with_another_node() {
 fn test_nested_group_undo_redo_stress() {
     // A → B → C → D, group B+C, undo, redo, undo, group B only, undo, redo
     let gs = GraphSignals::new();
-    let n1 = gs.add_node("A", (0.0, 0.0), vec![
+    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n2 = gs.add_node("B", (200.0, 0.0), vec![
+    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n3 = gs.add_node("C", (400.0, 0.0), vec![
+    let (n3, _) = gs.add_node("C", (400.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n4 = gs.add_node("D", (600.0, 0.0), vec![
+    let (n4, _) = gs.add_node("D", (600.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
     let _tc = render_sync(&gs);
@@ -1464,9 +1464,9 @@ fn test_nested_group_undo_redo_stress() {
         let d_in = g.node_ports(n4).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
         (a_out, b_in, b_out, c_in, c_out, d_in)
     });
-    gs.connect_ports(ports.0, ports.1);
-    gs.connect_ports(ports.2, ports.3);
-    gs.connect_ports(ports.4, ports.5);
+    gs.connect_ports(ports.0, ports.1).unwrap();
+    gs.connect_ports(ports.2, ports.3).unwrap();
+    gs.connect_ports(ports.4, ports.5).unwrap();
 
     assert_eq!(gs.node_count(), 4);
     assert_eq!(gs.connection_count(), 3);
@@ -1691,13 +1691,13 @@ fn test_undo_frame_clears_frame_list() {
 fn test_connect_through_reroute() {
     let gs = GraphSignals::new();
     // Create source (Float output), reroute (Any in/out), sink (Float input)
-    let src = gs.add_node("Src", (0.0, 0.0), vec![
+    let (src, _) = gs.add_node("Src", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let sink = gs.add_node("Sink", (400.0, 0.0), vec![
+    let (sink, _) = gs.add_node("Sink", (400.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
-    let reroute = gs.add_node("", (200.0, 0.0), vec![
+    let (reroute, _) = gs.add_node("", (200.0, 0.0), vec![
         (PortDirection::Input, SocketType::Any, "".to_string()),
         (PortDirection::Output, SocketType::Any, "".to_string()),
     ]);
@@ -1715,8 +1715,8 @@ fn test_connect_through_reroute() {
     });
 
     // Connect Src → Reroute → Sink
-    gs.connect_ports(src_out, reroute_in);
-    gs.connect_ports(reroute_out, sink_in);
+    gs.connect_ports(src_out, reroute_in).unwrap();
+    gs.connect_ports(reroute_out, sink_in).unwrap();
 
     assert_eq!(gs.connection_count(), 2, "Should have 2 connections through reroute");
 
@@ -1776,7 +1776,7 @@ fn test_multiple_frames() {
 fn test_delete_frame_leaves_nodes() {
     let (gs, _, _, out, inp) = new_two_node_graph();
     let _tc = render_sync(&gs);
-    gs.connect_ports(out, inp);
+    gs.connect_ports(out, inp).unwrap();
 
     let n1 = gs.node_list.lock_ref()[0];
     let n2 = gs.node_list.lock_ref()[1];
@@ -2086,7 +2086,7 @@ async fn test_noodle_drop_search_menu_dom_filtered() {
     });
 
     // Add a node with a Shader output so we have a real port to drag from
-    let shader_node = gs.add_node("BSDF", (0.0, 0.0), vec![
+    let (shader_node, _) = gs.add_node("BSDF", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Shader, "BSDF".to_string()),
     ]);
     let shader_port = gs.with_graph(|g| g.node_ports(shader_node)[0]);
@@ -2135,14 +2135,14 @@ async fn test_group_io_nodes_render_compact() {
     use nodegraph_core::layout::IO_NODE_WIDTH;
 
     let gs = GraphSignals::new();
-    let n1 = gs.add_node("A", (0.0, 0.0), vec![
+    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n2 = gs.add_node("B", (200.0, 0.0), vec![
+    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let n3 = gs.add_node("C", (400.0, 0.0), vec![
+    let (n3, _) = gs.add_node("C", (400.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
 
@@ -2150,8 +2150,8 @@ async fn test_group_io_nodes_render_compact() {
     let (a_out, b_in, b_out, c_in) = gs.with_graph(|g| {
         (g.node_ports(n1)[0], g.node_ports(n2)[0], g.node_ports(n2)[1], g.node_ports(n3)[0])
     });
-    gs.connect_ports(a_out, b_in);
-    gs.connect_ports(b_out, c_in);
+    gs.connect_ports(a_out, b_in).unwrap();
+    gs.connect_ports(b_out, c_in).unwrap();
 
     let _tc = render_sync(&gs);
 
@@ -2293,20 +2293,20 @@ fn test_connect_through_two_reroutes() {
     let _tc = render_sync(&gs);
 
     // Source(Float out) → R1(Any) → R2(Any) → Sink(Float in)
-    let src = gs.add_node("Src", (0.0, 0.0), vec![
+    let (src, _) = gs.add_node("Src", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let r1 = gs.add_node("R1", (100.0, 0.0), vec![
+    let (r1, _) = gs.add_node("R1", (100.0, 0.0), vec![
         (PortDirection::Input, SocketType::Any, "".to_string()),
         (PortDirection::Output, SocketType::Any, "".to_string()),
     ]);
     gs.with_graph_mut(|g| g.world.insert(r1, nodegraph_core::graph::reroute::IsReroute));
-    let r2 = gs.add_node("R2", (200.0, 0.0), vec![
+    let (r2, _) = gs.add_node("R2", (200.0, 0.0), vec![
         (PortDirection::Input, SocketType::Any, "".to_string()),
         (PortDirection::Output, SocketType::Any, "".to_string()),
     ]);
     gs.with_graph_mut(|g| g.world.insert(r2, nodegraph_core::graph::reroute::IsReroute));
-    let sink = gs.add_node("Sink", (300.0, 0.0), vec![
+    let (sink, _) = gs.add_node("Sink", (300.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
 
@@ -2317,9 +2317,9 @@ fn test_connect_through_two_reroutes() {
     });
 
     // Connect chain
-    gs.connect_ports(src_out, r1_in);
-    gs.connect_ports(r1_out, r2_in);
-    gs.connect_ports(r2_out, sink_in);
+    gs.connect_ports(src_out, r1_in).unwrap();
+    gs.connect_ports(r1_out, r2_in).unwrap();
+    gs.connect_ports(r2_out, sink_in).unwrap();
 
     assert_eq!(gs.with_graph(|g| g.connection_count()), 3, "Should have 3 connections");
     assert_eq!(gs.node_count(), 4);
@@ -2340,7 +2340,7 @@ fn test_connect_through_two_reroutes() {
 async fn test_collapsed_node_hides_ports_in_dom() {
     // Create a graph with one collapsed node — it should render without port circles
     let gs = GraphSignals::new();
-    let n = gs.add_node("Collapsed", (100.0, 100.0), vec![
+    let (n, _) = gs.add_node("Collapsed", (100.0, 100.0), vec![
         (PortDirection::Input, SocketType::Float, "A".to_string()),
         (PortDirection::Output, SocketType::Float, "B".to_string()),
     ]);

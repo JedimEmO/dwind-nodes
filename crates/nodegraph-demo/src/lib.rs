@@ -88,32 +88,32 @@ pub async fn main() {
     register_demo_node_types(&mut gs.registry.borrow_mut());
 
     // Build a demo graph
-    let math_add = gs.add_node("Math Add", (50.0, 50.0), vec![
+    let (math_add, _) = gs.add_node("Math Add", (50.0, 50.0), vec![
         (PortDirection::Input, SocketType::Float, "A".to_string()),
         (PortDirection::Input, SocketType::Float, "B".to_string()),
         (PortDirection::Output, SocketType::Float, "Result".to_string()),
     ]);
 
-    let color_mix = gs.add_node("Color Mix", (300.0, 30.0), vec![
+    let (color_mix, _) = gs.add_node("Color Mix", (300.0, 30.0), vec![
         (PortDirection::Input, SocketType::Color, "Color 1".to_string()),
         (PortDirection::Input, SocketType::Color, "Color 2".to_string()),
         (PortDirection::Input, SocketType::Float, "Factor".to_string()),
         (PortDirection::Output, SocketType::Color, "Color".to_string()),
     ]);
 
-    let output_node = gs.add_node("Material Output", (600.0, 60.0), vec![
+    let (output_node, _) = gs.add_node("Material Output", (600.0, 60.0), vec![
         (PortDirection::Input, SocketType::Shader, "Surface".to_string()),
         (PortDirection::Input, SocketType::Shader, "Volume".to_string()),
     ]);
 
-    let noise = gs.add_node("Noise Texture", (50.0, 250.0), vec![
+    let (noise, _) = gs.add_node("Noise Texture", (50.0, 250.0), vec![
         (PortDirection::Input, SocketType::Vector, "Vector".to_string()),
         (PortDirection::Input, SocketType::Float, "Scale".to_string()),
         (PortDirection::Output, SocketType::Color, "Color".to_string()),
         (PortDirection::Output, SocketType::Float, "Fac".to_string()),
     ]);
 
-    let shader = gs.add_node("Principled BSDF", (300.0, 220.0), vec![
+    let (shader, _) = gs.add_node("Principled BSDF", (300.0, 220.0), vec![
         (PortDirection::Input, SocketType::Color, "Base Color".to_string()),
         (PortDirection::Input, SocketType::Float, "Roughness".to_string()),
         (PortDirection::Input, SocketType::Float, "Metallic".to_string()),
@@ -134,7 +134,7 @@ pub async fn main() {
         }).nth(2).copied(); // Factor is the 3rd input
         drop(editor);
         if let (Some(src), Some(tgt)) = (math_out, mix_fac) {
-            gs.connect_ports(src, tgt);
+            gs.connect_ports(src, tgt).unwrap();
         }
     }
 
@@ -152,7 +152,7 @@ pub async fn main() {
         }).nth(0).copied();
         drop(editor);
         if let (Some(src), Some(tgt)) = (noise_color, shader_base) {
-            gs.connect_ports(src, tgt);
+            gs.connect_ports(src, tgt).unwrap();
         }
     }
 
@@ -170,7 +170,7 @@ pub async fn main() {
         }).copied();
         drop(editor);
         if let (Some(src), Some(tgt)) = (bsdf, surface) {
-            gs.connect_ports(src, tgt);
+            gs.connect_ports(src, tgt).unwrap();
         }
     }
 

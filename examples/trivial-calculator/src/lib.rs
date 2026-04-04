@@ -161,66 +161,39 @@ pub fn main() {
     }
 
     // Add nodes
-    let const_a = gs.add_node("Constant", (50.0, 50.0), vec![
+    let (const_a, const_a_ports) = gs.add_node("Constant", (50.0, 50.0), vec![
         (PortDirection::Output, SocketType::Float, "Value".to_string()),
     ]);
-    let const_b = gs.add_node("Constant", (50.0, 200.0), vec![
+    let (const_b, const_b_ports) = gs.add_node("Constant", (50.0, 200.0), vec![
         (PortDirection::Output, SocketType::Float, "Value".to_string()),
     ]);
-    let add = gs.add_node("Add", (300.0, 100.0), vec![
+    let (add, add_ports) = gs.add_node("Add", (300.0, 100.0), vec![
         (PortDirection::Input, SocketType::Float, "A".to_string()),
         (PortDirection::Input, SocketType::Float, "B".to_string()),
         (PortDirection::Output, SocketType::Float, "Result".to_string()),
     ]);
-    let display = gs.add_node("Display", (550.0, 100.0), vec![
+    let (display, display_ports) = gs.add_node("Display", (550.0, 100.0), vec![
         (PortDirection::Input, SocketType::Float, "Value".to_string()),
     ]);
 
     // Set initial constant values
-    {
-        let editor = gs.editor.borrow();
-        let graph = editor.current_graph();
-        let const_a_out = graph.node_ports(const_a)[0];
-        let const_b_out = graph.node_ports(const_b)[0];
-        drop(editor);
-        get_port_value(&port_values, const_a_out, 0.0).set(42.0);
-        get_port_value(&port_values, const_b_out, 0.0).set(8.0);
-    }
+    get_port_value(&port_values, const_a_ports[0], 0.0).set(42.0);
+    get_port_value(&port_values, const_b_ports[0], 0.0).set(8.0);
 
     // Connect: Constant(42) → Add.A, Constant(8) → Add.B, Add.Result → Display
-    {
-        let editor = gs.editor.borrow();
-        let graph = editor.current_graph();
-        let const_a_out = graph.node_ports(const_a)[0];
-        let const_b_out = graph.node_ports(const_b)[0];
-        let add_ports = graph.node_ports(add).to_vec();
-        let display_in = graph.node_ports(display)[0];
-        drop(editor);
-
-        gs.connect_ports(const_a_out, add_ports[0]);
-        gs.connect_ports(const_b_out, add_ports[1]);
-        gs.connect_ports(add_ports[2], display_in);
-    }
+    gs.connect_ports(const_a_ports[0], add_ports[0]).unwrap();
+    gs.connect_ports(const_b_ports[0], add_ports[1]).unwrap();
+    gs.connect_ports(add_ports[2], display_ports[0]).unwrap();
 
     // Port widget callback — renders float_input on Float ports
     {
         let pv = port_values.clone();
-        gs.port_widget.borrow_mut().replace(Rc::new(move |node_id, port_id, socket_type, _is_connected, gs| {
+        gs.port_widget.borrow_mut().replace(Rc::new(move |_node_id, port_id, socket_type, port_dir, type_id, is_connected, _gs| {
             if socket_type != SocketType::Float { return None; }
-            let (title, port_dir) = gs.with_graph(|g| {
-                let t = g.world.get::<NodeHeader>(node_id).map(|h| h.title.clone()).unwrap_or_default();
-                let d = g.world.get::<PortDirection>(port_id).copied().unwrap_or(PortDirection::Input);
-                (t, d)
-            });
-            match (title.as_str(), port_dir) {
-                // Constant: editable widget on the output port
-                ("Constant", PortDirection::Output) => {}
-                // Add (and similar): widget on disconnected input ports only
-                (_, PortDirection::Input) => {
-                    let connected = gs.with_graph(|g| !g.port_connections(port_id).is_empty());
-                    if connected { return None; }
-                }
-                // Everything else: no widget
+            match (type_id, port_dir) {
+                ("constant", PortDirection::Output) => {} // Always editable
+                ("display", _) => return None,            // Display never gets widgets
+                (_, PortDirection::Input) if !is_connected => {} // Disconnected inputs get widgets
                 _ => return None,
             }
             let mutable = get_port_value(&pv, port_id, 0.0);
