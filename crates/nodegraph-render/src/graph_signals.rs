@@ -61,6 +61,7 @@ pub struct GraphSignals {
     pub zoom: Mutable<f64>,
 
     pub connecting_from: Mutable<Option<(EntityId, SocketType, bool)>>,
+    pub drop_target_connection: Mutable<Option<EntityId>>,
     pub drop_target_port: Mutable<Option<EntityId>>,
     pub preview_wire: Mutable<Option<BezierPath>>,
     pub box_select_rect: Mutable<Option<(f64, f64, f64, f64)>>,
@@ -110,6 +111,7 @@ impl GraphSignals {
             pan: Mutable::new((0.0, 0.0)),
             zoom: Mutable::new(1.0),
             connecting_from: Mutable::new(None),
+            drop_target_connection: Mutable::new(None),
             drop_target_port: Mutable::new(None),
             preview_wire: Mutable::new(None),
             box_select_rect: Mutable::new(None),
@@ -464,12 +466,50 @@ impl GraphSignals {
                     }
                 }
             }
+            self.drop_target_connection.set(None);
         }
 
         let mut connections_may_have_changed = false;
         for effect in &effects {
             match effect {
-                SideEffect::NodesMoved => self.sync_all_positions(),
+                SideEffect::NodesMoved => {
+                    self.sync_all_positions();
+                    // Update drop_target_connection during single-node drag
+                    if is_now_dragging && dragged_nodes.len() == 1 {
+                        let node_id = dragged_nodes[0];
+                        let center = self.with_graph(|g| {
+                            g.world.get::<NodePosition>(node_id).map(|p| {
+                                let is_reroute = g.world.get::<nodegraph_core::graph::reroute::IsReroute>(node_id).is_some();
+                                if is_reroute {
+                                    layout::Vec2::new(p.x, p.y)
+                                } else {
+                                    let np = g.node_ports(node_id).len();
+                                    let h = layout::HEADER_HEIGHT + np as f64 * layout::PORT_HEIGHT;
+                                    layout::Vec2::new(p.x + layout::NODE_MIN_WIDTH / 2.0, p.y + h / 2.0)
+                                }
+                            })
+                        });
+                        if let Some(c) = center {
+                            let conn = {
+                                let editor = self.editor.borrow();
+                                let graph = editor.current_graph();
+                                let cache = layout::LayoutCache::compute(graph);
+                                nodegraph_core::interaction::hit_test_connection(&cache, c)
+                            };
+                            // Filter out self-connections
+                            let conn = conn.filter(|&cid| {
+                                !self.with_graph(|g| {
+                                    g.world.get::<ConnectionEndpoints>(cid).map(|ep| {
+                                        let so = g.world.get::<nodegraph_core::graph::port::PortOwner>(ep.source_port).map(|o| o.0);
+                                        let to = g.world.get::<nodegraph_core::graph::port::PortOwner>(ep.target_port).map(|o| o.0);
+                                        so == Some(node_id) || to == Some(node_id)
+                                    }).unwrap_or(false)
+                                })
+                            });
+                            self.drop_target_connection.set(conn);
+                        }
+                    }
+                }
                 SideEffect::SelectionChanged => self.sync_selection(),
                 SideEffect::ConnectionCreated(conn_id) => {
                     self.connection_list.lock_mut().push_cloned(*conn_id);

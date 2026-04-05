@@ -83,11 +83,17 @@ pub fn render_connection(conn_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
 
     if !is_conversion {
         let color = format!("rgb({},{},{})", src_color[0], src_color[1], src_color[2]);
+        let drop_target = gs.drop_target_connection.clone();
         svg!("path", {
             .attr_signal("d", d_signal)
             .attr("fill", "none")
             .attr("stroke", &color)
-            .attr("stroke-width", "2")
+            .attr_signal("stroke-width", drop_target.signal().map(move |dt| {
+                if dt == Some(conn_id) { "4" } else { "2" }
+            }))
+            .attr_signal("filter", drop_target.signal().map(move |dt| {
+                if dt == Some(conn_id) { "drop-shadow(0 0 3px rgba(74,158,255,0.8))" } else { "" }
+            }))
         })
     } else {
         // Gradient from source to target color
@@ -112,12 +118,17 @@ pub fn render_connection(conn_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                     .child(svg!("stop", { .attr("offset", "100%").attr("stop-color", &tgt_css) }))
                 }))
             }))
-            .child(svg!("path", {
-                .attr_signal("d", d_signal)
-                .attr("fill", "none")
-                .attr("stroke", &stroke_url)
-                .attr("stroke-width", "2")
-            }))
+            .child({
+                let drop_target = gs.drop_target_connection.clone();
+                svg!("path", {
+                    .attr_signal("d", d_signal)
+                    .attr("fill", "none")
+                    .attr("stroke", &stroke_url)
+                    .attr_signal("stroke-width", drop_target.signal().map(move |dt| {
+                        if dt == Some(conn_id) { "4" } else { "2" }
+                    }))
+                })
+            })
         })
     }
 }
