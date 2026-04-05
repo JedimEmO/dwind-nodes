@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+/// Port data type. Determines connection compatibility and visual color.
+///
+/// Connections are allowed between compatible types (checked via
+/// [`is_compatible_with`](Self::is_compatible_with)). `Any` is compatible with everything
+/// (used by reroute nodes). Implicit conversions are allowed between
+/// Float/Int/Bool and Float/Color/Vector.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SocketType {
     Float,

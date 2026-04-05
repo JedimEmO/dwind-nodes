@@ -43,53 +43,69 @@ pub fn is_valid_connection_target(
 
 pub fn is_exact_type_match(a: SocketType, b: SocketType) -> bool { a == b }
 
+/// Central reactive bridge between the graph data model and the DOM.
+///
+/// Create with `GraphSignals::new()`, register node types via `registry`,
+/// set callbacks via `custom_node_body` / `port_widget` / `on_connect` etc.,
+/// then pass to `render_graph_editor()`.
 pub struct GraphSignals {
+    // === User-facing API ===
+
+    /// Access to the underlying graph data model.
     pub editor: Rc<RefCell<GraphEditor>>,
-    pub history: Rc<RefCell<UndoHistory>>,
-    pub controller: Rc<RefCell<InteractionController>>,
-
-    pub node_list: MutableVec<EntityId>,
-    pub connection_list: MutableVec<EntityId>,
-    pub frame_list: MutableVec<EntityId>,
-    pub node_positions: Rc<RefCell<HashMap<EntityId, Mutable<(f64, f64)>>>>,
-    pub node_headers: Rc<RefCell<HashMap<EntityId, Mutable<NodeHeader>>>>,
-    pub frame_bounds: Rc<RefCell<HashMap<EntityId, Mutable<(f64, f64, f64, f64)>>>>,
-
+    /// Currently selected node IDs.
     pub selection: Mutable<Vec<EntityId>>,
+    /// Currently selected frame IDs.
     pub selected_frames: Mutable<Vec<EntityId>>,
+    /// Viewport pan offset (x, y) in screen pixels.
     pub pan: Mutable<(f64, f64)>,
+    /// Viewport zoom level (1.0 = 100%).
     pub zoom: Mutable<f64>,
-
-    pub connecting_from: Mutable<Option<(EntityId, SocketType, bool)>>,
-    pub drop_target_connection: Mutable<Option<EntityId>>,
-    pub drop_target_port: Mutable<Option<EntityId>>,
-    pub preview_wire: Mutable<Option<BezierPath>>,
-    pub box_select_rect: Mutable<Option<(f64, f64, f64, f64)>>,
-    pub cut_line_points: Mutable<Vec<(f64, f64)>>,
-    pub cursor_world: Mutable<(f64, f64)>,
-
+    /// Node type registry for the search menu (Shift+A).
     pub registry: Rc<RefCell<NodeTypeRegistry>>,
-    pub search_menu: Mutable<Option<(f64, f64)>>,
-    pub pending_connection: Mutable<Option<(EntityId, SocketType, bool)>>,
-
-    pub current_graph_id: Mutable<EntityId>,
-    last_synced_graph: std::cell::Cell<Option<EntityId>>,
-    pub breadcrumb: MutableVec<(EntityId, String)>,
-
+    /// Visual theme (colors, opacities).
     pub theme: Rc<Theme>,
-    pub custom_node_body: Rc<RefCell<Option<Rc<CustomNodeBodyFn>>>>,
-    pub port_widget: Rc<RefCell<Option<Rc<PortWidgetFn>>>>,
+    /// Bounding box of all nodes (min_x, min_y, max_x, max_y). Updates on position sync.
     pub graph_bounds: Mutable<(f64, f64, f64, f64)>,
-    pub viewport_size: Mutable<(f64, f64)>,
 
-    // Context menu
-    pub context_menu: Mutable<Option<(HitTarget, f64, f64)>>,
+    /// Optional callback to render custom content inside node bodies.
+    pub custom_node_body: Rc<RefCell<Option<Rc<CustomNodeBodyFn>>>>,
+    /// Optional callback to render inline widgets on port rows.
+    pub port_widget: Rc<RefCell<Option<Rc<PortWidgetFn>>>>,
 
-    // Event callbacks
+    /// Called when a connection is created. Args: (source_port, target_port, connection_id).
     pub on_connect: RefCell<Option<Box<dyn Fn(EntityId, EntityId, EntityId)>>>,
+    /// Called when a connection is removed. Args: (connection_id).
     pub on_disconnect: RefCell<Option<Box<dyn Fn(EntityId)>>>,
+    /// Called when the selection changes. Args: (new_selection).
     pub on_selection_changed: RefCell<Option<Box<dyn Fn(&[EntityId])>>>,
+    /// Called when nodes are moved. Args: (vec of (node_id, x, y)).
     pub on_node_moved: RefCell<Option<Box<dyn Fn(&[(EntityId, f64, f64)])>>>,
+
+    // === Internal state (hidden from docs, used by rendering modules) ===
+
+    #[doc(hidden)] pub history: Rc<RefCell<UndoHistory>>,
+    #[doc(hidden)] pub controller: Rc<RefCell<InteractionController>>,
+    #[doc(hidden)] pub node_list: MutableVec<EntityId>,
+    #[doc(hidden)] pub connection_list: MutableVec<EntityId>,
+    #[doc(hidden)] pub frame_list: MutableVec<EntityId>,
+    #[doc(hidden)] pub node_positions: Rc<RefCell<HashMap<EntityId, Mutable<(f64, f64)>>>>,
+    #[doc(hidden)] pub node_headers: Rc<RefCell<HashMap<EntityId, Mutable<NodeHeader>>>>,
+    #[doc(hidden)] pub frame_bounds: Rc<RefCell<HashMap<EntityId, Mutable<(f64, f64, f64, f64)>>>>,
+    #[doc(hidden)] pub connecting_from: Mutable<Option<(EntityId, SocketType, bool)>>,
+    #[doc(hidden)] pub drop_target_connection: Mutable<Option<EntityId>>,
+    #[doc(hidden)] pub drop_target_port: Mutable<Option<EntityId>>,
+    #[doc(hidden)] pub preview_wire: Mutable<Option<BezierPath>>,
+    #[doc(hidden)] pub box_select_rect: Mutable<Option<(f64, f64, f64, f64)>>,
+    #[doc(hidden)] pub cut_line_points: Mutable<Vec<(f64, f64)>>,
+    #[doc(hidden)] pub cursor_world: Mutable<(f64, f64)>,
+    #[doc(hidden)] pub search_menu: Mutable<Option<(f64, f64)>>,
+    #[doc(hidden)] pub pending_connection: Mutable<Option<(EntityId, SocketType, bool)>>,
+    #[doc(hidden)] pub current_graph_id: Mutable<EntityId>,
+    #[doc(hidden)] pub breadcrumb: MutableVec<(EntityId, String)>,
+    #[doc(hidden)] pub context_menu: Mutable<Option<(HitTarget, f64, f64)>>,
+    #[doc(hidden)] pub viewport_size: Mutable<(f64, f64)>,
+    pub(crate) last_synced_graph: std::cell::Cell<Option<EntityId>>,
 }
 
 impl GraphSignals {

@@ -14,14 +14,10 @@ use dominator::{html, clone};
 use futures_signals::signal::{Mutable, SignalExt};
 use futures_signals::signal_vec::SignalVecExt;
 
-use nodegraph_core::graph::node::NodeHeader;
-use nodegraph_core::graph::port::{PortDirection, PortOwner};
+use nodegraph_core::{EntityId, NodeHeader, PortDirection, SocketType, NodeTypeDefinition, PortDefinition};
+use nodegraph_core::graph::port::PortOwner;
 use nodegraph_core::graph::connection::ConnectionEndpoints;
-use nodegraph_core::search::{NodeTypeDefinition, PortDefinition};
-use nodegraph_core::store::EntityId;
-use nodegraph_core::types::socket_type::SocketType;
-use nodegraph_render::graph_signals::GraphSignals;
-use nodegraph_render::viewport_view::render_graph_editor;
+use nodegraph_render::{GraphSignals, render_graph_editor};
 use nodegraph_widgets::float_input::{float_input, FloatInputProps};
 
 // ============================================================

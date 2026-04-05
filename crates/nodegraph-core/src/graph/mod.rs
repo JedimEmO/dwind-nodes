@@ -26,6 +26,13 @@ pub enum ConnectionError {
     SameNode,
 }
 
+/// A single node graph containing nodes, ports, connections, and frames.
+///
+/// Use [`add_node`](Self::add_node) to create nodes, [`add_port`](Self::add_port) to add
+/// typed ports, and [`connect`](Self::connect) to wire them together. Supports serialization
+/// via [`serialize`](Self::serialize) / [`deserialize`](Self::deserialize).
+///
+/// For multi-graph hierarchies (groups/subgraphs), use [`GraphEditor`] instead.
 #[derive(Clone)]
 pub struct NodeGraph {
     pub world: World,
@@ -369,6 +376,14 @@ pub enum GroupIOKind {
     Output,
 }
 
+/// Multi-graph editor managing a hierarchy of node graphs (root + subgraphs).
+///
+/// Provides node grouping via [`group_nodes`](Self::group_nodes), subgraph navigation
+/// via [`enter_group`](Self::enter_group) / [`exit_group`](Self::exit_group), and full
+/// serialization via [`serialize_editor`](Self::serialize_editor).
+///
+/// For rendering, wrap in [`GraphSignals`](crate::graph_signals::GraphSignals) and pass
+/// to [`render_graph_editor`](crate::viewport_view::render_graph_editor).
 #[derive(Clone)]
 pub struct GraphEditor {
     graphs: HashMap<EntityId, NodeGraph>,

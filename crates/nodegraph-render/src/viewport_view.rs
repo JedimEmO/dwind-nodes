@@ -16,6 +16,18 @@ use crate::minimap_view::render_minimap;
 use crate::context_menu::render_context_menu;
 use crate::event_bridge;
 
+/// Render a complete node graph editor as a DOM element.
+///
+/// The returned `Dom` fills its parent container (100% width/height) and provides:
+/// pan (middle-click), zoom (scroll), node dragging, connection drawing,
+/// box selection, cut links (Ctrl+RMB), search menu (Shift+A), right-click
+/// context menu, minimap, and keyboard shortcuts.
+///
+/// ```rust,no_run
+/// let gs = GraphSignals::new();
+/// // ... register node types, add nodes, connect ...
+/// dominator::append_dom(&dominator::body(), render_graph_editor(gs));
+/// ```
 pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
     let container_rect: Rc<Cell<(f64, f64)>> = Rc::new(Cell::new((0.0, 0.0)));
 
