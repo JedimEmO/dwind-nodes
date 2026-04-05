@@ -768,11 +768,8 @@ impl GraphSignals {
                 }
             }
             drop(editor);
-            if graph_changed {
-                { let mut l = self.frame_list.lock_mut(); l.clear(); for &id in &frames { l.push_cloned(id); } }
-            } else {
-                Self::sync_entity_list(&self.frame_list, &frames);
-            }
+            // Always clear+rebuild frames (few elements, ensures color/label changes render)
+            { let mut l = self.frame_list.lock_mut(); l.clear(); for &id in &frames { l.push_cloned(id); } }
         }
         self.sync_selection();
         self.recompute_graph_bounds();
