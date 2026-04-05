@@ -427,16 +427,28 @@ impl GraphSignals {
         // Node-on-wire insert: if a node was dragged onto a connection, auto-insert it
         if was_dragging && is_now_idle && dragged_nodes.len() == 1 {
             let node_id = dragged_nodes[0];
-            let node_pos = self.with_graph(|g| {
-                g.world.get::<NodePosition>(node_id).map(|p| layout::Vec2::new(p.x, p.y))
+            // Get the node's bounding rect center for hit testing
+            let node_center = self.with_graph(|g| {
+                g.world.get::<NodePosition>(node_id).map(|p| {
+                    let is_reroute = g.world.get::<nodegraph_core::graph::reroute::IsReroute>(node_id).is_some();
+                    if is_reroute {
+                        // Reroute position IS the center
+                        layout::Vec2::new(p.x, p.y)
+                    } else {
+                        // Regular node: position is top-left, center is offset
+                        let num_ports = g.node_ports(node_id).len();
+                        let h = layout::HEADER_HEIGHT + num_ports as f64 * layout::PORT_HEIGHT;
+                        layout::Vec2::new(p.x + layout::NODE_MIN_WIDTH / 2.0, p.y + h / 2.0)
+                    }
+                })
             });
-            if let Some(pos) = node_pos {
-                // Use connection-only hit test (skip nodes/ports to avoid self-hit)
+            if let Some(center) = node_center {
+                // Use connection-only hit test at the node center
                 let conn_hit = {
                     let editor = self.editor.borrow();
                     let graph = editor.current_graph();
                     let cache = layout::LayoutCache::compute(graph);
-                    nodegraph_core::interaction::hit_test_connection(&cache, pos)
+                    nodegraph_core::interaction::hit_test_connection(&cache, center)
                 };
                 if let Some(conn_id) = conn_hit {
                     // Don't insert onto a connection that already involves this node

@@ -61,9 +61,11 @@ pub fn hit_test(_graph: &NodeGraph, cache: &LayoutCache, world_pos: Vec2) -> Hit
 
 /// Hit test connections only — ignores nodes, ports, frames.
 /// Used when checking if a dragged node landed on a wire.
+/// Uses a larger threshold than normal hit testing since we're matching a node center to a wire.
 pub fn hit_test_connection(cache: &LayoutCache, world_pos: Vec2) -> Option<EntityId> {
+    let threshold = 20.0; // Generous — node dropped "near" the wire counts
     for (&conn_id, path) in &cache.connection_paths {
-        if path.distance_to_point(world_pos) <= CONNECTION_HIT_THRESHOLD {
+        if path.distance_to_point(world_pos) <= threshold {
             return Some(conn_id);
         }
     }
