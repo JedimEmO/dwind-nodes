@@ -424,24 +424,21 @@ impl GraphSignals {
             self.save_undo();
         }
 
-        // Reroute insert: if a reroute was dragged onto a connection, split it
+        // Node-on-wire insert: if a node was dragged onto a connection, auto-insert it
         if was_dragging && is_now_idle && dragged_nodes.len() == 1 {
-            let reroute_id = dragged_nodes[0];
-            let is_reroute = self.with_graph(|g| g.world.get::<nodegraph_core::graph::reroute::IsReroute>(reroute_id).is_some());
-            if is_reroute {
-                let reroute_pos = self.with_graph(|g| {
-                    g.world.get::<NodePosition>(reroute_id).map(|p| layout::Vec2::new(p.x, p.y))
-                });
-                if let Some(pos) = reroute_pos {
-                    let hit = {
-                        let editor = self.editor.borrow();
-                        let graph = editor.current_graph();
-                        let cache = layout::LayoutCache::compute(graph);
-                        nodegraph_core::interaction::hit_test(graph, &cache, pos)
-                    };
-                    if let nodegraph_core::interaction::HitTarget::Connection(conn_id) = hit {
-                        self.split_connection_with_reroute(conn_id, reroute_id);
-                    }
+            let node_id = dragged_nodes[0];
+            let node_pos = self.with_graph(|g| {
+                g.world.get::<NodePosition>(node_id).map(|p| layout::Vec2::new(p.x, p.y))
+            });
+            if let Some(pos) = node_pos {
+                let hit = {
+                    let editor = self.editor.borrow();
+                    let graph = editor.current_graph();
+                    let cache = layout::LayoutCache::compute(graph);
+                    nodegraph_core::interaction::hit_test(graph, &cache, pos)
+                };
+                if let nodegraph_core::interaction::HitTarget::Connection(conn_id) = hit {
+                    self.insert_node_on_connection(node_id, conn_id);
                 }
             }
         }
@@ -513,27 +510,44 @@ impl GraphSignals {
     pub fn reconcile_connections_pub(&self) { self.reconcile_connections(); }
     pub fn full_sync_pub(&self) { self.full_sync(); }
 
-    fn split_connection_with_reroute(&self, conn_id: EntityId, reroute_id: EntityId) {
-        let endpoints = self.with_graph(|g| {
-            g.world.get::<ConnectionEndpoints>(conn_id).cloned()
-        });
-        if let Some(ep) = endpoints {
-            let reroute_ports = self.with_graph(|g| g.node_ports(reroute_id).to_vec());
-            let reroute_in = reroute_ports.iter().find(|&&pid| {
-                self.with_graph(|g| g.world.get::<PortDirection>(pid).copied()) == Some(PortDirection::Input)
-            }).copied();
-            let reroute_out = reroute_ports.iter().find(|&&pid| {
-                self.with_graph(|g| g.world.get::<PortDirection>(pid).copied()) == Some(PortDirection::Output)
-            }).copied();
+    fn insert_node_on_connection(&self, node_id: EntityId, conn_id: EntityId) {
+        use nodegraph_core::graph::port::PortSocketType;
 
-            if let (Some(r_in), Some(r_out)) = (reroute_in, reroute_out) {
-                // Disconnect original
-                self.with_graph_mut(|g| g.disconnect(conn_id));
-                // Connect: source → reroute input, reroute output → target
-                let _ = self.connect_ports_no_undo(ep.source_port, r_in);
-                let _ = self.connect_ports_no_undo(r_out, ep.target_port);
-                self.reconcile_connections();
-            }
+        let (endpoints, src_type, tgt_type, node_ports) = self.with_graph(|g| {
+            let ep = g.world.get::<ConnectionEndpoints>(conn_id).cloned();
+            let st = ep.as_ref().and_then(|e| g.world.get::<PortSocketType>(e.source_port).map(|s| s.0));
+            let tt = ep.as_ref().and_then(|e| g.world.get::<PortSocketType>(e.target_port).map(|s| s.0));
+            let ports = g.node_ports(node_id).to_vec();
+            (ep, st, tt, ports)
+        });
+
+        let Some(ep) = endpoints else { return };
+        let Some(src_type) = src_type else { return };
+        let Some(tgt_type) = tgt_type else { return };
+
+        // Find first compatible input port (src_type → port)
+        let compatible_in = self.with_graph(|g| {
+            node_ports.iter().find(|&&pid| {
+                let dir = g.world.get::<PortDirection>(pid).copied();
+                let pt = g.world.get::<PortSocketType>(pid).map(|s| s.0);
+                dir == Some(PortDirection::Input) && pt.map(|t| src_type.is_compatible_with(&t)).unwrap_or(false)
+            }).copied()
+        });
+
+        // Find first compatible output port (port → tgt_type)
+        let compatible_out = self.with_graph(|g| {
+            node_ports.iter().find(|&&pid| {
+                let dir = g.world.get::<PortDirection>(pid).copied();
+                let pt = g.world.get::<PortSocketType>(pid).map(|s| s.0);
+                dir == Some(PortDirection::Output) && pt.map(|t| t.is_compatible_with(&tgt_type)).unwrap_or(false)
+            }).copied()
+        });
+
+        if let (Some(n_in), Some(n_out)) = (compatible_in, compatible_out) {
+            self.with_graph_mut(|g| g.disconnect(conn_id));
+            let _ = self.connect_ports_no_undo(ep.source_port, n_in);
+            let _ = self.connect_ports_no_undo(n_out, ep.target_port);
+            self.reconcile_connections();
         }
     }
 
@@ -630,10 +644,71 @@ impl GraphSignals {
         let selected_frames = self.selected_frames.get_cloned();
         if selected_nodes.is_empty() && selected_frames.is_empty() { return; }
         self.save_undo();
-        for &nid in &selected_nodes { self.with_graph_mut(|g| g.remove_node(nid)); }
+        for &nid in &selected_nodes {
+            // Auto-reconnect: bridge upstream→downstream before deleting
+            let bridges = self.find_bridge_connections(nid);
+            self.with_graph_mut(|g| g.remove_node(nid));
+            for (upstream, downstream) in bridges {
+                let _ = self.connect_ports_no_undo(upstream, downstream);
+            }
+        }
         for &fid in &selected_frames { self.with_graph_mut(|g| g.remove_frame(fid)); }
         self.selected_frames.set(Vec::new());
         self.full_sync();
+    }
+
+    /// Find connection pairs that flow through a node and could be bridged on deletion.
+    fn find_bridge_connections(&self, node_id: EntityId) -> Vec<(EntityId, EntityId)> {
+        use nodegraph_core::graph::port::PortSocketType;
+
+        self.with_graph(|g| {
+            let ports = g.node_ports(node_id).to_vec();
+
+            // Collect all incoming connections (upstream_source_port → this node's input)
+            let mut upstreams: Vec<EntityId> = Vec::new();
+            for &pid in &ports {
+                if g.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) { continue; }
+                for &conn_id in g.port_connections(pid) {
+                    if let Some(ep) = g.world.get::<ConnectionEndpoints>(conn_id) {
+                        if ep.target_port == pid {
+                            upstreams.push(ep.source_port);
+                        }
+                    }
+                }
+            }
+
+            // Collect all outgoing connections (this node's output → downstream_target_port)
+            let mut downstreams: Vec<EntityId> = Vec::new();
+            for &pid in &ports {
+                if g.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Output) { continue; }
+                for &conn_id in g.port_connections(pid) {
+                    if let Some(ep) = g.world.get::<ConnectionEndpoints>(conn_id) {
+                        if ep.source_port == pid {
+                            downstreams.push(ep.target_port);
+                        }
+                    }
+                }
+            }
+
+            // Match upstream→downstream by type compatibility
+            let mut bridges = Vec::new();
+            let mut used_downstreams = std::collections::HashSet::new();
+            for &upstream in &upstreams {
+                let up_type = g.world.get::<PortSocketType>(upstream).map(|s| s.0);
+                for &downstream in &downstreams {
+                    if used_downstreams.contains(&downstream) { continue; }
+                    let down_type = g.world.get::<PortSocketType>(downstream).map(|s| s.0);
+                    if let (Some(ut), Some(dt)) = (up_type, down_type) {
+                        if ut.is_compatible_with(&dt) {
+                            bridges.push((upstream, downstream));
+                            used_downstreams.insert(downstream);
+                            break;
+                        }
+                    }
+                }
+            }
+            bridges
+        })
     }
 
     pub fn undo(self: &Rc<Self>) {

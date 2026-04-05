@@ -1724,7 +1724,7 @@ fn test_connect_through_reroute() {
     gs.select_single(reroute);
     gs.delete_selected();
     assert_eq!(gs.node_count(), 2, "Reroute deleted, Src and Sink remain");
-    assert_eq!(gs.connection_count(), 0, "Connections through reroute removed");
+    assert_eq!(gs.connection_count(), 1, "Auto-reconnected: Src → Sink after reroute deleted");
 
     // Undo → reroute + connections back
     gs.undo();
@@ -2328,7 +2328,7 @@ fn test_connect_through_two_reroutes() {
     gs.select_single(r1);
     gs.delete_selected();
     assert_eq!(gs.node_count(), 3, "R1 removed");
-    assert_eq!(gs.with_graph(|g| g.connection_count()), 1, "Only R2→Sink remains");
+    assert_eq!(gs.with_graph(|g| g.connection_count()), 2, "Auto-reconnected: Src→R2 + R2→Sink");
 
     // Undo
     gs.undo();
