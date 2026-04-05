@@ -161,18 +161,18 @@ pub fn main() {
     }
 
     // Add nodes
-    let (const_a, const_a_ports) = gs.add_node("Constant", (50.0, 50.0), vec![
+    let (_, const_a_ports) = gs.add_node_typed("Constant", Some("constant"), (50.0, 50.0), vec![
         (PortDirection::Output, SocketType::Float, "Value".to_string()),
     ]);
-    let (const_b, const_b_ports) = gs.add_node("Constant", (50.0, 200.0), vec![
+    let (_, const_b_ports) = gs.add_node_typed("Constant", Some("constant"), (50.0, 200.0), vec![
         (PortDirection::Output, SocketType::Float, "Value".to_string()),
     ]);
-    let (add, add_ports) = gs.add_node("Add", (300.0, 100.0), vec![
+    let (_, add_ports) = gs.add_node_typed("Add", Some("add"), (300.0, 100.0), vec![
         (PortDirection::Input, SocketType::Float, "A".to_string()),
         (PortDirection::Input, SocketType::Float, "B".to_string()),
         (PortDirection::Output, SocketType::Float, "Result".to_string()),
     ]);
-    let (display, display_ports) = gs.add_node("Display", (550.0, 100.0), vec![
+    let (_, display_ports) = gs.add_node_typed("Display", Some("display"), (550.0, 100.0), vec![
         (PortDirection::Input, SocketType::Float, "Value".to_string()),
     ]);
 
@@ -303,6 +303,68 @@ pub fn main() {
         }
     }
 
-    // Render
-    dominator::append_dom(&dominator::body(), render_graph_editor(gs));
+    // Layout: side-by-side — graph editor on left, JSON panel on right
+    dominator::append_dom(&dominator::body(), html!("div", {
+        .style("display", "flex")
+        .style("width", "100%")
+        .style("height", "100%")
+
+        // Graph editor — takes remaining space
+        .child(html!("div", {
+            .style("flex", "1")
+            .style("min-width", "0")
+            .style("height", "100%")
+            .child(render_graph_editor(gs.clone()))
+        }))
+
+        // JSON panel — fixed width docked on right
+        .child(html!("div", {
+            .style("width", "320px")
+            .style("flex-shrink", "0")
+            .style("height", "100%")
+            .style("background", "#12121f")
+            .style("border-left", "1px solid #333")
+            .style("display", "flex")
+            .style("flex-direction", "column")
+            .style("font-family", "monospace")
+
+            // Header
+            .child(html!("div", {
+                .style("padding", "8px 12px")
+                .style("font-size", "11px")
+                .style("font-weight", "bold")
+                .style("color", "#888")
+                .style("border-bottom", "1px solid #333")
+                .style("flex-shrink", "0")
+                .text("Serialized Graph (live)")
+            }))
+
+            // JSON content — reactive over both node_list and connection_list
+            .child(html!("pre", {
+                .style("flex", "1")
+                .style("margin", "0")
+                .style("padding", "8px 12px")
+                .style("overflow-y", "auto")
+                .style("color", "#8f8")
+                .style("font-size", "10px")
+                .style("line-height", "1.4")
+                .style("white-space", "pre-wrap")
+                .style("word-break", "break-all")
+                .text_signal(
+                    futures_signals::map_ref! {
+                        let _nodes = gs.node_list.signal_vec_cloned().to_signal_cloned(),
+                        let _conns = gs.connection_list.signal_vec_cloned().to_signal_cloned(),
+                        let _bounds = gs.graph_bounds.signal() => {
+                            ()
+                        }
+                    }.map(clone!(gs => move |_| {
+                        gs.with_graph(|g| {
+                            let serialized = g.serialize();
+                            serde_json::to_string_pretty(&serialized).unwrap_or_default()
+                        })
+                    }))
+                )
+            }))
+        }))
+    }));
 }

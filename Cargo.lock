@@ -815,6 +815,7 @@ dependencies = [
  "nodegraph-core",
  "nodegraph-render",
  "nodegraph-widgets",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]

@@ -153,11 +153,18 @@ impl GraphSignals {
     // ============================================================
 
     pub fn add_node(&self, title: &str, position: (f64, f64), ports: Vec<(PortDirection, SocketType, String)>) -> (EntityId, Vec<EntityId>) {
+        self.add_node_typed(title, None, position, ports)
+    }
+
+    pub fn add_node_typed(&self, title: &str, type_id: Option<&str>, position: (f64, f64), ports: Vec<(PortDirection, SocketType, String)>) -> (EntityId, Vec<EntityId>) {
         let (node_id, port_ids) = self.with_graph_mut(|graph| {
             let nid = graph.add_node(title, position);
             let pids: Vec<EntityId> = ports.iter()
                 .map(|(dir, st, label)| graph.add_port(nid, *dir, *st, label))
                 .collect();
+            if let Some(tid) = type_id {
+                graph.world.insert(nid, nodegraph_core::graph::node::NodeTypeId(tid.to_string()));
+            }
             (nid, pids)
         });
         let header = self.with_graph(|g| g.world.get::<NodeHeader>(node_id).cloned()
