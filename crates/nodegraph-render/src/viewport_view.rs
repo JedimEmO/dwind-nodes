@@ -117,8 +117,13 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                 let key = e.key();
                 let ctrl = e.ctrl_key();
                 let shift = e.shift_key();
-                // Escape always closes search menu first
+                // Escape closes overlays
                 if key == "Escape" {
+                    if gs.show_help.get() {
+                        gs.show_help.set(false);
+                        e.prevent_default();
+                        return;
+                    }
                     if gs.search_menu.get().is_some() {
                         gs.close_search_menu();
                         e.prevent_default();
@@ -142,6 +147,7 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                         gs.open_search_menu(wx, wy);
                         true
                     }
+                    "?" => { gs.show_help.set(!gs.show_help.get()); true }
                     _ => false,
                 };
                 if handled { e.prevent_default(); }
@@ -204,6 +210,81 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
 
         // Context menu (HTML, screen space)
         .child(render_context_menu(&gs))
+
+        // Keyboard shortcut help overlay (? to toggle)
+        .child(html!("div", {
+            .style("position", "absolute")
+            .style("top", "50%")
+            .style("left", "50%")
+            .style("transform", "translate(-50%, -50%)")
+            .style("z-index", "200")
+            .style("background", "rgba(20, 20, 35, 0.95)")
+            .style("border", &format!("1px solid {}", gs.theme.menu_border))
+            .style("border-radius", "8px")
+            .style("padding", "20px 28px")
+            .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
+            .style("color", "#ccc")
+            .style("font-size", "12px")
+            .style("box-shadow", "0 8px 32px rgba(0,0,0,0.6)")
+            .style("pointer-events", "auto")
+            .style("max-width", "420px")
+            .style_signal("display", gs.show_help.signal().map(|show| {
+                if show { "block" } else { "none" }
+            }))
+
+            .child(html!("div", {
+                .style("font-size", "14px")
+                .style("font-weight", "bold")
+                .style("color", "white")
+                .style("margin-bottom", "12px")
+                .text("Keyboard Shortcuts")
+            }))
+
+            .child(html!("div", {
+                .style("display", "grid")
+                .style("grid-template-columns", "auto 1fr")
+                .style("gap", "4px 16px")
+                .style("line-height", "1.6")
+
+                .children(vec![
+                    ("Shift+A", "Add node (search menu)"),
+                    ("Delete / X", "Delete selected"),
+                    ("Ctrl+Z", "Undo"),
+                    ("Ctrl+Shift+Z", "Redo"),
+                    ("Shift+D", "Duplicate"),
+                    ("G", "Group selected"),
+                    ("Shift+G", "Ungroup"),
+                    ("F", "Create frame"),
+                    ("H", "Collapse / Expand"),
+                    ("M", "Mute / Unmute"),
+                    ("A", "Select all / Deselect"),
+                    ("Middle mouse", "Pan viewport"),
+                    ("Scroll", "Zoom"),
+                    ("Ctrl+RMB drag", "Cut links"),
+                    ("Right-click", "Context menu"),
+                    ("?", "Toggle this help"),
+                ].into_iter().map(|(key, desc)| {
+                    vec![
+                        html!("span", {
+                            .style("color", gs.theme.selection_highlight)
+                            .style("font-weight", "bold")
+                            .style("font-family", "monospace")
+                            .style("font-size", "11px")
+                            .text(key)
+                        }),
+                        html!("span", { .text(desc) }),
+                    ]
+                }).flatten().collect::<Vec<_>>())
+            }))
+
+            .child(html!("div", {
+                .style("margin-top", "12px")
+                .style("color", "#666")
+                .style("font-size", "10px")
+                .style("text-align", "center")
+                .text("Press ? or Escape to close")
+            }))
+        }))
 
         // Minimap (bottom-right corner)
         .child(render_minimap(&gs))

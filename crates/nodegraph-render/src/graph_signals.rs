@@ -105,6 +105,8 @@ pub struct GraphSignals {
     #[doc(hidden)] pub breadcrumb: MutableVec<(EntityId, String)>,
     #[doc(hidden)] pub context_menu: Mutable<Option<(HitTarget, f64, f64)>>,
     #[doc(hidden)] pub viewport_size: Mutable<(f64, f64)>,
+    /// Whether the keyboard shortcut help overlay is visible.
+    pub show_help: Mutable<bool>,
     pub(crate) last_synced_graph: std::cell::Cell<Option<EntityId>>,
 }
 
@@ -144,6 +146,7 @@ impl GraphSignals {
             port_widget: Rc::new(RefCell::new(None)),
             graph_bounds: Mutable::new((0.0, 0.0, 800.0, 600.0)),
             viewport_size: Mutable::new((800.0, 600.0)),
+            show_help: Mutable::new(false),
             context_menu: Mutable::new(None),
             on_connect: RefCell::new(None),
             on_disconnect: RefCell::new(None),
