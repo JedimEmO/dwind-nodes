@@ -594,6 +594,8 @@ impl GraphSignals {
     }
 
     pub fn create_frame_around_selected(self: &Rc<Self>) {
+        // Don't create frame if a frame is already selected (prevents framing frames)
+        if !self.selected_frames.get_cloned().is_empty() { return; }
         let selected = self.selection.get_cloned();
         if selected.is_empty() { return; }
         self.save_undo();
