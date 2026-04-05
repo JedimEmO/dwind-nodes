@@ -15,6 +15,7 @@ use nodegraph_core::interaction::{InteractionController, InputEvent, SideEffect,
 use nodegraph_core::layout::{self, BezierPath, Vec2, PORT_RADIUS};
 use nodegraph_core::search::NodeTypeRegistry;
 use nodegraph_core::store::EntityId;
+use nodegraph_core::interaction::HitTarget;
 use nodegraph_core::types::socket_type::SocketType;
 
 use dominator::Dom;
@@ -80,6 +81,9 @@ pub struct GraphSignals {
     pub graph_bounds: Mutable<(f64, f64, f64, f64)>,
     pub viewport_size: Mutable<(f64, f64)>,
 
+    // Context menu
+    pub context_menu: Mutable<Option<(HitTarget, f64, f64)>>,
+
     // Event callbacks
     pub on_connect: RefCell<Option<Box<dyn Fn(EntityId, EntityId, EntityId)>>>,
     pub on_disconnect: RefCell<Option<Box<dyn Fn(EntityId)>>>,
@@ -122,6 +126,7 @@ impl GraphSignals {
             port_widget: Rc::new(RefCell::new(None)),
             graph_bounds: Mutable::new((0.0, 0.0, 800.0, 600.0)),
             viewport_size: Mutable::new((800.0, 600.0)),
+            context_menu: Mutable::new(None),
             on_connect: RefCell::new(None),
             on_disconnect: RefCell::new(None),
             on_selection_changed: RefCell::new(None),
@@ -153,7 +158,7 @@ impl GraphSignals {
     }
 
     /// Snapshot the current editor state for undo. Call BEFORE mutating.
-    fn save_undo(&self) {
+    pub fn save_undo(&self) {
         let editor = self.editor.borrow();
         self.history.borrow_mut().save(&editor);
     }
@@ -395,8 +400,15 @@ impl GraphSignals {
             }
         }
 
-        // Track drag start for undo
+        // Track drag state transitions for undo + reroute insert
         let was_idle = matches!(self.controller.borrow().state, InteractionState::Idle);
+        let was_dragging = matches!(self.controller.borrow().state, InteractionState::DraggingNodes { .. });
+        let dragged_nodes: Vec<EntityId> = if was_dragging {
+            match &self.controller.borrow().state {
+                InteractionState::DraggingNodes { node_ids, .. } => node_ids.clone(),
+                _ => Vec::new(),
+            }
+        } else { Vec::new() };
 
         let effects = {
             let mut editor = self.editor.borrow_mut();
@@ -405,10 +417,33 @@ impl GraphSignals {
         };
 
         let is_now_dragging = matches!(self.controller.borrow().state, InteractionState::DraggingNodes { .. });
+        let is_now_idle = matches!(self.controller.borrow().state, InteractionState::Idle);
 
         // Save undo at the START of a drag (transition from Idle to DraggingNodes)
         if was_idle && is_now_dragging {
             self.save_undo();
+        }
+
+        // Reroute insert: if a reroute was dragged onto a connection, split it
+        if was_dragging && is_now_idle && dragged_nodes.len() == 1 {
+            let reroute_id = dragged_nodes[0];
+            let is_reroute = self.with_graph(|g| g.world.get::<nodegraph_core::graph::reroute::IsReroute>(reroute_id).is_some());
+            if is_reroute {
+                let reroute_pos = self.with_graph(|g| {
+                    g.world.get::<NodePosition>(reroute_id).map(|p| layout::Vec2::new(p.x, p.y))
+                });
+                if let Some(pos) = reroute_pos {
+                    let hit = {
+                        let editor = self.editor.borrow();
+                        let graph = editor.current_graph();
+                        let cache = layout::LayoutCache::compute(graph);
+                        nodegraph_core::interaction::hit_test(graph, &cache, pos)
+                    };
+                    if let nodegraph_core::interaction::HitTarget::Connection(conn_id) = hit {
+                        self.split_connection_with_reroute(conn_id, reroute_id);
+                    }
+                }
+            }
         }
 
         let mut connections_may_have_changed = false;
@@ -471,6 +506,33 @@ impl GraphSignals {
                 if let Some(cb) = self.on_disconnect.borrow().as_ref() { cb(dead_id); }
             } else {
                 i += 1;
+            }
+        }
+    }
+
+    pub fn reconcile_connections_pub(&self) { self.reconcile_connections(); }
+    pub fn full_sync_pub(&self) { self.full_sync(); }
+
+    fn split_connection_with_reroute(&self, conn_id: EntityId, reroute_id: EntityId) {
+        let endpoints = self.with_graph(|g| {
+            g.world.get::<ConnectionEndpoints>(conn_id).cloned()
+        });
+        if let Some(ep) = endpoints {
+            let reroute_ports = self.with_graph(|g| g.node_ports(reroute_id).to_vec());
+            let reroute_in = reroute_ports.iter().find(|&&pid| {
+                self.with_graph(|g| g.world.get::<PortDirection>(pid).copied()) == Some(PortDirection::Input)
+            }).copied();
+            let reroute_out = reroute_ports.iter().find(|&&pid| {
+                self.with_graph(|g| g.world.get::<PortDirection>(pid).copied()) == Some(PortDirection::Output)
+            }).copied();
+
+            if let (Some(r_in), Some(r_out)) = (reroute_in, reroute_out) {
+                // Disconnect original
+                self.with_graph_mut(|g| g.disconnect(conn_id));
+                // Connect: source → reroute input, reroute output → target
+                let _ = self.connect_ports_no_undo(ep.source_port, r_in);
+                let _ = self.connect_ports_no_undo(r_out, ep.target_port);
+                self.reconcile_connections();
             }
         }
     }

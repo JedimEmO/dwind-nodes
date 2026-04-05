@@ -7,3 +7,4 @@ pub mod event_bridge;
 pub mod search_menu;
 pub mod frame_view;
 pub mod minimap_view;
+pub mod context_menu;

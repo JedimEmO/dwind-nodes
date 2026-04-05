@@ -13,6 +13,7 @@ use crate::connection_view::{render_connection, render_preview_wire, render_cut_
 use crate::frame_view::render_frame;
 use crate::search_menu::render_search_menu;
 use crate::minimap_view::render_minimap;
+use crate::context_menu::render_context_menu;
 use crate::event_bridge;
 
 pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
@@ -34,10 +35,42 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
 
         .event_with_options(
             &EventOptions { preventable: true, ..EventOptions::default() },
-            |e: events::ContextMenu| { e.prevent_default(); }
+            clone!(gs, container_rect => move |e: events::ContextMenu| {
+                e.prevent_default();
+                // Open context menu at click position with hit target
+                let cr = container_rect.get();
+                let screen_x = e.mouse_x() as f64 - cr.0;
+                let screen_y = e.mouse_y() as f64 - cr.1;
+                let (pan_x, pan_y) = gs.pan.get();
+                let zoom = gs.zoom.get();
+                let world_x = (screen_x - pan_x) / zoom;
+                let world_y = (screen_y - pan_y) / zoom;
+
+                let target = {
+                    let editor = gs.editor.borrow();
+                    let graph = editor.current_graph();
+                    let cache = nodegraph_core::layout::LayoutCache::compute(graph);
+                    nodegraph_core::interaction::hit_test(graph, &cache, nodegraph_core::layout::Vec2::new(world_x, world_y))
+                };
+
+                gs.context_menu.set(Some((target, world_x, world_y)));
+            })
         )
 
         .event(clone!(gs, container_rect => move |e: events::MouseDown| {
+            // Close context menu on click outside
+            if gs.context_menu.get().is_some() {
+                if let Some(target) = e.target() {
+                    let target_el: Result<web_sys::Element, _> = target.dyn_into();
+                    if let Ok(el) = target_el {
+                        if el.closest("[data-context-menu]").ok().flatten().is_some() {
+                            return;
+                        }
+                    }
+                }
+                gs.context_menu.set(None);
+                return;
+            }
             if gs.search_menu.get().is_some() {
                 // Check if the click is inside the search menu
                 if let Some(target) = e.target() {
@@ -156,6 +189,9 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
 
         // Search menu (HTML, screen space, above SVG)
         .child(render_search_menu(&gs))
+
+        // Context menu (HTML, screen space)
+        .child(render_context_menu(&gs))
 
         // Minimap (bottom-right corner)
         .child(render_minimap(&gs))

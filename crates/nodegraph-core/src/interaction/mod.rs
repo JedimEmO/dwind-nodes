@@ -12,7 +12,7 @@ use crate::viewport::Viewport;
 // Hit testing
 // ============================================================
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum HitTarget {
     Nothing,
     Node(EntityId),

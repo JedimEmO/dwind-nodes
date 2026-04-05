@@ -2386,8 +2386,11 @@ async fn test_frame_title_renders_in_dom() {
     // The frame was created with default label "Frame" by create_frame_around_selected
 
     let _tc = render_sync(&gs);
-    let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
-    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+    // Two flushes needed: one for child_signal, one for text_signal inside it
+    for _ in 0..2 {
+        let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
+        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+    }
 
     // Frame title is rendered inside a foreignObject
     let doc = web_sys::window().unwrap().document().unwrap();
