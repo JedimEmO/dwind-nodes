@@ -431,14 +431,25 @@ impl GraphSignals {
                 g.world.get::<NodePosition>(node_id).map(|p| layout::Vec2::new(p.x, p.y))
             });
             if let Some(pos) = node_pos {
-                let hit = {
+                // Use connection-only hit test (skip nodes/ports to avoid self-hit)
+                let conn_hit = {
                     let editor = self.editor.borrow();
                     let graph = editor.current_graph();
                     let cache = layout::LayoutCache::compute(graph);
-                    nodegraph_core::interaction::hit_test(graph, &cache, pos)
+                    nodegraph_core::interaction::hit_test_connection(&cache, pos)
                 };
-                if let nodegraph_core::interaction::HitTarget::Connection(conn_id) = hit {
-                    self.insert_node_on_connection(node_id, conn_id);
+                if let Some(conn_id) = conn_hit {
+                    // Don't insert onto a connection that already involves this node
+                    let involves_self = self.with_graph(|g| {
+                        g.world.get::<ConnectionEndpoints>(conn_id).map(|ep| {
+                            let src_owner = g.world.get::<nodegraph_core::graph::port::PortOwner>(ep.source_port).map(|o| o.0);
+                            let tgt_owner = g.world.get::<nodegraph_core::graph::port::PortOwner>(ep.target_port).map(|o| o.0);
+                            src_owner == Some(node_id) || tgt_owner == Some(node_id)
+                        }).unwrap_or(false)
+                    });
+                    if !involves_self {
+                        self.insert_node_on_connection(node_id, conn_id);
+                    }
                 }
             }
         }

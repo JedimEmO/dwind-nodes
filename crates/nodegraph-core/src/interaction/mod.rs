@@ -59,6 +59,17 @@ pub fn hit_test(_graph: &NodeGraph, cache: &LayoutCache, world_pos: Vec2) -> Hit
     HitTarget::Nothing
 }
 
+/// Hit test connections only — ignores nodes, ports, frames.
+/// Used when checking if a dragged node landed on a wire.
+pub fn hit_test_connection(cache: &LayoutCache, world_pos: Vec2) -> Option<EntityId> {
+    for (&conn_id, path) in &cache.connection_paths {
+        if path.distance_to_point(world_pos) <= CONNECTION_HIT_THRESHOLD {
+            return Some(conn_id);
+        }
+    }
+    None
+}
+
 /// Find all nodes whose bounding box intersects the given world-space rect.
 pub fn hit_test_rect(cache: &LayoutCache, world_rect: Rect) -> Vec<EntityId> {
     cache
