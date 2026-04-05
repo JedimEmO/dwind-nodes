@@ -263,34 +263,25 @@ pub fn main() {
     // Initial evaluation
     evaluate(&gs, &port_values);
 
-    // Re-evaluate reactively on connection changes
+    // Re-evaluate on connection changes via event callbacks
     {
         let pv = port_values.clone();
-        wasm_bindgen_futures::spawn_local(clone!(gs => async move {
-            gs.connection_list.signal_vec_cloned()
-                .to_signal_cloned()
-                .for_each(clone!(gs => move |_| {
-                    evaluate(&gs, &pv);
-                    async {}
-                })).await;
-        }));
+        let gs2 = gs.clone();
+        *gs.on_connect.borrow_mut() = Some(Box::new(move |_, _, _| { evaluate(&gs2, &pv); }));
+    }
+    {
+        let pv = port_values.clone();
+        let gs2 = gs.clone();
+        *gs.on_disconnect.borrow_mut() = Some(Box::new(move |_| { evaluate(&gs2, &pv); }));
     }
 
-    // Re-evaluate when any input port value changes (e.g., user edits a Constant or Add default)
+    // Re-evaluate when any port value changes (user edits a Constant or Add default)
     {
         let pv = port_values.clone();
-        let all_input_ports: Vec<EntityId> = {
-            let editor = gs.editor.borrow();
-            let graph = editor.current_graph();
-            let mut ports = Vec::new();
-            for (nid, _) in graph.world.query::<NodeHeader>() {
-                for &pid in graph.node_ports(nid) {
-                    ports.push(pid);
-                }
-            }
-            ports
-        };
-        for port_id in all_input_ports {
+        let all_ports: Vec<EntityId> = gs.with_graph(|g| {
+            g.world.query::<NodeHeader>().flat_map(|(nid, _)| g.node_ports(nid).to_vec()).collect()
+        });
+        for port_id in all_ports {
             let pv = pv.clone();
             let gs = gs.clone();
             let mutable = get_port_value(&pv, port_id, 0.0);

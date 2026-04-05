@@ -79,6 +79,12 @@ pub struct GraphSignals {
     pub port_widget: Rc<RefCell<Option<Rc<PortWidgetFn>>>>,
     pub graph_bounds: Mutable<(f64, f64, f64, f64)>,
     pub viewport_size: Mutable<(f64, f64)>,
+
+    // Event callbacks
+    pub on_connect: RefCell<Option<Box<dyn Fn(EntityId, EntityId, EntityId)>>>,
+    pub on_disconnect: RefCell<Option<Box<dyn Fn(EntityId)>>>,
+    pub on_selection_changed: RefCell<Option<Box<dyn Fn(&[EntityId])>>>,
+    pub on_node_moved: RefCell<Option<Box<dyn Fn(&[(EntityId, f64, f64)])>>>,
 }
 
 impl GraphSignals {
@@ -116,6 +122,10 @@ impl GraphSignals {
             port_widget: Rc::new(RefCell::new(None)),
             graph_bounds: Mutable::new((0.0, 0.0, 800.0, 600.0)),
             viewport_size: Mutable::new((800.0, 600.0)),
+            on_connect: RefCell::new(None),
+            on_disconnect: RefCell::new(None),
+            on_selection_changed: RefCell::new(None),
+            on_node_moved: RefCell::new(None),
         })
     }
 
@@ -240,6 +250,7 @@ impl GraphSignals {
         self.connection_list.lock_mut().push_cloned(conn_id);
         self.reconcile_connections();
         self.adapt_io_ports_after_connect(source, target);
+        if let Some(cb) = self.on_connect.borrow().as_ref() { cb(source, target, conn_id); }
         Ok(conn_id)
     }
 
@@ -338,6 +349,7 @@ impl GraphSignals {
                         self.connection_list.lock_mut().push_cloned(conn_id);
                         self.reconcile_connections();
                         self.adapt_io_ports_after_connect(source_port, target_port);
+                        if let Some(cb) = self.on_connect.borrow().as_ref() { cb(source_port, target_port, conn_id); }
                     }
                     self.connecting_from.set(None);
                 } else {
@@ -452,7 +464,15 @@ impl GraphSignals {
         drop(editor);
         let mut list = self.connection_list.lock_mut();
         let mut i = 0;
-        while i < list.len() { if !live.contains(&list[i]) { list.remove(i); } else { i += 1; } }
+        while i < list.len() {
+            if !live.contains(&list[i]) {
+                let dead_id = list[i];
+                list.remove(i);
+                if let Some(cb) = self.on_disconnect.borrow().as_ref() { cb(dead_id); }
+            } else {
+                i += 1;
+            }
+        }
     }
 
     // ============================================================
@@ -697,11 +717,18 @@ impl GraphSignals {
     }
 
     fn sync_all_positions(&self) {
+        let mut moved = Vec::new();
         let editor = self.editor.borrow();
         let graph = editor.current_graph();
         let positions = self.node_positions.borrow();
         for (id, mutable) in positions.iter() {
-            if let Some(pos) = graph.world.get::<NodePosition>(*id) { mutable.set((pos.x, pos.y)); }
+            if let Some(pos) = graph.world.get::<NodePosition>(*id) {
+                let new_pos = (pos.x, pos.y);
+                if mutable.get() != new_pos {
+                    mutable.set(new_pos);
+                    moved.push((*id, pos.x, pos.y));
+                }
+            }
         }
         // Recompute frame bounds from member positions
         let bounds = self.frame_bounds.borrow();
@@ -713,6 +740,9 @@ impl GraphSignals {
         }
         drop(editor);
         self.recompute_graph_bounds();
+        if !moved.is_empty() {
+            if let Some(cb) = self.on_node_moved.borrow().as_ref() { cb(&moved); }
+        }
     }
 
     fn recompute_graph_bounds(&self) {
@@ -743,7 +773,9 @@ impl GraphSignals {
     }
 
     fn sync_selection(&self) {
-        self.selection.set(self.controller.borrow().selection.selected.clone());
+        let sel = self.controller.borrow().selection.selected.clone();
+        self.selection.set(sel.clone());
+        if let Some(cb) = self.on_selection_changed.borrow().as_ref() { cb(&sel); }
     }
 
     pub fn get_node_position_signal(&self, node_id: EntityId) -> Option<Mutable<(f64, f64)>> {
