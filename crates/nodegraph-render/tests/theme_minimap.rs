@@ -27,6 +27,7 @@ impl TestContainer {
         self.element.clone().dyn_into().unwrap()
     }
 
+    #[allow(dead_code)]
     fn query(&self, selector: &str) -> Option<web_sys::Element> {
         self.element.query_selector(selector).unwrap()
     }
@@ -56,12 +57,10 @@ async fn flush_microtasks() {
 #[wasm_bindgen_test]
 fn test_canvas_uses_theme_bg() {
     let gs = GraphSignals::new();
-    let tc = render_sync(&gs);
+    let _tc = render_sync(&gs);
 
     // dominator sets styles via JS style property, not style attribute.
-    // Check computed style of the editor container.
     let doc = web_sys::window().unwrap().document().unwrap();
-    let window = web_sys::window().unwrap();
     let all_divs = doc.query_selector_all("div").unwrap();
     let mut found = false;
     for i in 0..all_divs.length() {

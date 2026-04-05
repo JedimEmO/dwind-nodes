@@ -91,7 +91,7 @@ pub fn render_frame(frame_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                         }))
                         .event_with_options(
                             &EventOptions { preventable: true, ..EventOptions::default() },
-                            clone!(editing => move |e: events::KeyDown| {
+                            move |e: events::KeyDown| {
                                 e.stop_propagation();
                                 if e.key() == "Enter" || e.key() == "Escape" {
                                     if let Some(target) = e.target() {
@@ -100,7 +100,7 @@ pub fn render_frame(frame_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                                         }
                                     }
                                 }
-                            })
+                            }
                         )
                     }))
                 } else {

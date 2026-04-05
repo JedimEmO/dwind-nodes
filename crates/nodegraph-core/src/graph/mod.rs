@@ -491,7 +491,7 @@ impl GraphEditor {
         let parent = self.graphs.get_mut(&current_id)?;
 
         // Collect node data from parent
-        let mut node_set: std::collections::HashSet<EntityId> = node_ids.iter().copied().collect();
+        let node_set: std::collections::HashSet<EntityId> = node_ids.iter().copied().collect();
 
         // Identify cut connections: connections where one end is in the selection and the other isn't
         let mut external_inputs: Vec<(EntityId, EntityId, SocketType, String)> = Vec::new(); // (ext_src_port, int_tgt_port, type, label)
@@ -719,13 +719,13 @@ impl GraphEditor {
         }
 
         // Collect internal connections (between non-IO nodes)
-        for (conn_id, ep) in subgraph.world.query::<ConnectionEndpoints>() {
+        for (_conn_id, ep) in subgraph.world.query::<ConnectionEndpoints>() {
             sub_connections.push((ep.source_port, ep.target_port));
         }
 
         // Find IO port → internal port connections (for reconnecting externals)
         let mut io_to_internal: HashMap<EntityId, EntityId> = HashMap::new(); // io_port → internal_port
-        for (conn_id, ep) in subgraph.world.query::<ConnectionEndpoints>() {
+        for (_conn_id, ep) in subgraph.world.query::<ConnectionEndpoints>() {
             let src_owner = subgraph.world.get::<PortOwner>(ep.source_port).map(|o| o.0);
             let tgt_owner = subgraph.world.get::<PortOwner>(ep.target_port).map(|o| o.0);
             let src_is_io = src_owner.and_then(|o| subgraph.world.get::<GroupIOKind>(o)).is_some();
@@ -1038,7 +1038,7 @@ mod graph_editor_tests {
     #[test]
     fn group_middle_node() {
         let mut ge = GraphEditor::new();
-        let (n1, n2, n3) = build_chain(&mut ge);
+        let (_n1, n2, _n3) = build_chain(&mut ge);
 
         // Group just n2 (the middle node)
         let result = ge.group_nodes(&[n2]);

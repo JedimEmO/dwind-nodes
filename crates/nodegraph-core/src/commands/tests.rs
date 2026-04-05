@@ -1,8 +1,7 @@
 use super::*;
 use crate::graph::GraphEditor;
-use crate::graph::node::{NodeHeader, NodePosition, MuteState};
+use crate::graph::node::NodePosition;
 use crate::graph::port::PortDirection;
-use crate::graph::connection::ConnectionEndpoints;
 use crate::types::socket_type::SocketType;
 use crate::store::EntityId;
 

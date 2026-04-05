@@ -23,7 +23,7 @@ use crate::event_bridge;
 /// box selection, cut links (Ctrl+RMB), search menu (Shift+A), right-click
 /// context menu, minimap, and keyboard shortcuts.
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// let gs = GraphSignals::new();
 /// // ... register node types, add nodes, connect ...
 /// dominator::append_dom(&dominator::body(), render_graph_editor(gs));

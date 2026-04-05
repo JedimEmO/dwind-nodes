@@ -51,6 +51,7 @@ impl TestContainer {
     }
 
     /// Query within this container only.
+    #[allow(dead_code)]
     fn query_all(&self, selector: &str) -> web_sys::NodeList {
         self.element.query_selector_all(selector).unwrap()
     }
@@ -1065,7 +1066,7 @@ fn test_group_io_node_type_adapts() {
 #[wasm_bindgen_test]
 fn test_nested_groups() {
     let gs = GraphSignals::new();
-    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
+    let (_n1, _) = gs.add_node("A", (0.0, 0.0), vec![
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
     let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
@@ -1076,7 +1077,7 @@ fn test_nested_groups() {
         (PortDirection::Input, SocketType::Float, "In".to_string()),
         (PortDirection::Output, SocketType::Float, "Out".to_string()),
     ]);
-    let (n4, _) = gs.add_node("D", (600.0, 0.0), vec![
+    let (_n4, _) = gs.add_node("D", (600.0, 0.0), vec![
         (PortDirection::Input, SocketType::Float, "In".to_string()),
     ]);
     let _tc = render_sync(&gs);
@@ -1234,7 +1235,7 @@ fn test_undo_group() {
 
 #[wasm_bindgen_test]
 fn test_undo_delete_in_group() {
-    let (gs, _n1, n2, _n3) = setup_three_node_chain();
+    let (gs, _n1, _n2, _n3) = setup_three_node_chain();
     let _tc = render_sync(&gs);
 
     // Delete node A
@@ -1409,7 +1410,7 @@ fn test_group_a_group_with_another_node() {
         let group = g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
             .map(|(id, _)| id).next().unwrap();
         let c = g.world.query::<nodegraph_core::graph::node::NodeHeader>()
-            .find(|(id, h)| h.title == "C")
+            .find(|(_id, h)| h.title == "C")
             .map(|(id, _)| id).unwrap();
         (group, c)
     });
@@ -2202,10 +2203,10 @@ async fn test_group_io_nodes_render_compact() {
 
 #[wasm_bindgen_test]
 fn test_port_offset_exact_coordinates() {
-    use nodegraph_core::layout::{HEADER_HEIGHT, PORT_HEIGHT, NODE_MIN_WIDTH, REROUTE_SIZE};
+    use nodegraph_core::layout::{HEADER_HEIGHT, PORT_HEIGHT, NODE_MIN_WIDTH};
 
     // Two-node graph: Source at (100,100), Target at (400,100)
-    let (gs, n1, n2, out, inp) = new_two_node_graph();
+    let (gs, _n1, _n2, out, inp) = new_two_node_graph();
 
     // Output port on Source: x = node_x + NODE_MIN_WIDTH, y = node_y + HEADER_HEIGHT + 0.5 * PORT_HEIGHT
     let out_pos = gs.port_world_pos(out).unwrap();

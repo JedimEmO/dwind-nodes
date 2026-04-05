@@ -119,14 +119,14 @@ fn render_minimap_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
         (Some(pos), Some(header)) => {
             svg!("rect", {
                 .attr_signal("x", map_ref! {
-                    let (px, py) = pos.signal(),
+                    let (px, _py) = pos.signal(),
                     let b = bounds.signal() => {
                         let (ox, _, s) = minimap_transform(*b);
                         format!("{}", ox + (px - b.0) * s)
                     }
                 })
                 .attr_signal("y", map_ref! {
-                    let (px, py) = pos.signal(),
+                    let (_px, py) = pos.signal(),
                     let b = bounds.signal() => {
                         let (_, oy, s) = minimap_transform(*b);
                         format!("{}", oy + (py - b.1) * s)
@@ -218,7 +218,7 @@ fn render_minimap_viewport(gs: &Rc<GraphSignals>) -> Dom {
             let pan = gs.pan.signal(),
             let zoom = gs.zoom.signal(),
             let bounds = gs.graph_bounds.signal(),
-            let vp_size = gs.viewport_size.signal() => {
+            let _vp_size = gs.viewport_size.signal() => {
                 let (ox, _, s) = minimap_transform(*bounds);
                 let world_x = -pan.0 / zoom;
                 format!("{}", ox + (world_x - bounds.0) * s)
@@ -228,7 +228,7 @@ fn render_minimap_viewport(gs: &Rc<GraphSignals>) -> Dom {
             let pan = gs.pan.signal(),
             let zoom = gs.zoom.signal(),
             let bounds = gs.graph_bounds.signal(),
-            let vp_size = gs.viewport_size.signal() => {
+            let _vp_size = gs.viewport_size.signal() => {
                 let (_, oy, s) = minimap_transform(*bounds);
                 let world_y = -pan.1 / zoom;
                 format!("{}", oy + (world_y - bounds.1) * s)
