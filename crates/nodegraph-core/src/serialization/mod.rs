@@ -138,6 +138,11 @@ impl NodeGraph {
     }
 
     pub fn deserialize(data: &SerializedGraph) -> Result<Self, DeserializeError> {
+        Self::deserialize_with_id_map(data).map(|(graph, _)| graph)
+    }
+
+    /// Deserialize and return the old→new entity ID mapping (used by GraphEditor deserialization).
+    pub fn deserialize_with_id_map(data: &SerializedGraph) -> Result<(Self, HashMap<u32, EntityId>), DeserializeError> {
         let mut graph = NodeGraph::new();
         let mut id_map: HashMap<u32, EntityId> = HashMap::new();
 
@@ -197,7 +202,7 @@ impl NodeGraph {
             graph.add_frame(&sframe.label, sframe.color, &members);
         }
 
-        Ok(graph)
+        Ok((graph, id_map))
     }
 }
 

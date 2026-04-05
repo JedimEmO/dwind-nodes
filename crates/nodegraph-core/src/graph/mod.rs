@@ -903,36 +903,33 @@ impl GraphEditor {
 
         let mut graphs: HashMap<EntityId, NodeGraph> = HashMap::new();
         let mut graph_id_map: HashMap<u32, EntityId> = HashMap::new();
+        // Per-graph entity ID mappings: old serialized ID → new EntityId
+        let mut per_graph_id_maps: HashMap<u32, HashMap<u32, EntityId>> = HashMap::new();
 
         for (&old_graph_id, sgraph) in &data.graphs {
-            let graph = NodeGraph::deserialize(sgraph)?;
+            let (graph, id_map) = NodeGraph::deserialize_with_id_map(sgraph)?;
             let new_graph_id = EntityId { index: old_graph_id, generation: Default::default() };
             graphs.insert(new_graph_id, graph);
             graph_id_map.insert(old_graph_id, new_graph_id);
+            per_graph_id_maps.insert(old_graph_id, id_map);
         }
 
         let root_graph_id = *graph_id_map.get(&data.root_graph_id)
             .unwrap_or(&EntityId { index: data.root_graph_id, generation: Default::default() });
 
-        // Restore SubgraphRoot and build subgraph_parents cache
+        // Restore SubgraphRoot using serialized node IDs (deterministic, no heuristics)
         let mut subgraph_parents: HashMap<EntityId, (EntityId, EntityId)> = HashMap::new();
 
         for (&old_graph_id, sgraph) in &data.graphs {
             let parent_graph_id = *graph_id_map.get(&old_graph_id).unwrap();
-            let graph = graphs.get(&parent_graph_id).unwrap();
 
-            for snode in &sgraph.nodes {
-                if let Some(old_subgraph_id) = snode.subgraph_id {
-                    if let Some(&new_subgraph_id) = graph_id_map.get(&old_subgraph_id) {
-                        for (node_id, header) in graph.world.query::<NodeHeader>() {
-                            if header.title == snode.header.title {
-                                let pos = graph.world.get::<node::NodePosition>(node_id);
-                                if let Some(p) = pos {
-                                    if (p.x - snode.position.0).abs() < 0.01 && (p.y - snode.position.1).abs() < 0.01 {
-                                        subgraph_parents.insert(new_subgraph_id, (parent_graph_id, node_id));
-                                        break;
-                                    }
-                                }
+            if let Some(id_map) = per_graph_id_maps.get(&old_graph_id) {
+                for snode in &sgraph.nodes {
+                    if let Some(old_subgraph_id) = snode.subgraph_id {
+                        if let Some(&new_subgraph_id) = graph_id_map.get(&old_subgraph_id) {
+                            // Look up the new EntityId for this node using the exact serialized ID
+                            if let Some(&new_node_id) = id_map.get(&snode.id) {
+                                subgraph_parents.insert(new_subgraph_id, (parent_graph_id, new_node_id));
                             }
                         }
                     }
