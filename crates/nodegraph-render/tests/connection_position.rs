@@ -2367,3 +2367,81 @@ async fn test_collapsed_node_hides_ports_in_dom() {
     let ports = node_group.query_selector_all("[data-port-id]").unwrap();
     assert_eq!(ports.length(), 0, "Collapsed node should have 0 port circles, got {}", ports.length());
 }
+
+// ============================================================
+// DOM rendering: frame title
+// ============================================================
+
+#[wasm_bindgen_test]
+async fn test_frame_title_renders_in_dom() {
+    let gs = GraphSignals::new();
+    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![]);
+    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![]);
+
+    gs.controller.borrow_mut().selection.select(n1);
+    gs.controller.borrow_mut().selection.select(n2);
+    gs.selection.set(vec![n1, n2]);
+    gs.create_frame_around_selected();
+
+    // The frame was created with default label "Frame" by create_frame_around_selected
+
+    let _tc = render_sync(&gs);
+    let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+
+    // Frame title is rendered inside a foreignObject
+    let doc = web_sys::window().unwrap().document().unwrap();
+    let foreign_objects = doc.query_selector_all("foreignObject").unwrap();
+    let mut found_frame_title = false;
+    for i in 0..foreign_objects.length() {
+        if let Some(el) = foreign_objects.get(i) {
+            let text = el.text_content().unwrap_or_default();
+            if text.contains("Frame") {
+                found_frame_title = true;
+                break;
+            }
+        }
+    }
+    assert!(found_frame_title, "Frame title should appear in DOM");
+}
+
+// ============================================================
+// DOM rendering: reroute diamond
+// ============================================================
+
+#[wasm_bindgen_test]
+async fn test_reroute_renders_diamond_polygon() {
+    let gs = GraphSignals::new();
+    let (reroute, _) = gs.add_node("", (100.0, 100.0), vec![
+        (PortDirection::Input, SocketType::Any, "".to_string()),
+        (PortDirection::Output, SocketType::Any, "".to_string()),
+    ]);
+    gs.with_graph_mut(|g| g.world.insert(reroute, nodegraph_core::graph::reroute::IsReroute));
+
+    let _tc = render_sync(&gs);
+    let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+
+    let doc = web_sys::window().unwrap().document().unwrap();
+
+    // Reroute should render polygon elements (diamond shape)
+    let node_group = doc.query_selector("[data-node-id]").unwrap();
+    assert!(node_group.is_some(), "Reroute node should exist in DOM");
+    let node_group = node_group.unwrap();
+
+    let polygons = node_group.query_selector_all("polygon").unwrap();
+    assert!(polygons.length() >= 2, "Reroute should have at least 2 polygons (fill + highlight), got {}", polygons.length());
+
+    // Check diamond points match REROUTE_SIZE = 10
+    if let Some(poly) = polygons.get(0) {
+        if let Ok(el) = poly.dyn_into::<web_sys::Element>() {
+            let points = el.get_attribute("points").unwrap_or_default();
+            assert_eq!(points, "10,0 0,10 -10,0 0,-10",
+                "Diamond points should match REROUTE_SIZE=10, got '{}'", points);
+        }
+    }
+
+    // Reroute should NOT have a foreignObject (no HTML content)
+    let foreign = node_group.query_selector("foreignObject").unwrap();
+    assert!(foreign.is_none(), "Reroute should not have foreignObject");
+}

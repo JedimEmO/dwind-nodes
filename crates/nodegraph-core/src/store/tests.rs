@@ -509,6 +509,53 @@ fn serialization_roundtrip_frames_and_reroutes() {
     assert_eq!(members.0.len(), 2, "Frame should have 2 members after roundtrip");
 }
 
+#[test]
+fn serialization_roundtrip_with_subgraphs() {
+    use crate::graph::GraphEditor;
+
+    let mut ge = GraphEditor::new();
+
+    // Build A → B → C chain in root
+    let a = ge.current_graph_mut().add_node("A", (0.0, 0.0));
+    let a_out = ge.current_graph_mut().add_port(a, PortDirection::Output, SocketType::Float, "Out");
+    let b = ge.current_graph_mut().add_node("B", (200.0, 0.0));
+    let b_in = ge.current_graph_mut().add_port(b, PortDirection::Input, SocketType::Float, "In");
+    let b_out = ge.current_graph_mut().add_port(b, PortDirection::Output, SocketType::Float, "Out");
+    let c = ge.current_graph_mut().add_node("C", (400.0, 0.0));
+    let c_in = ge.current_graph_mut().add_port(c, PortDirection::Input, SocketType::Float, "In");
+    ge.current_graph_mut().connect(a_out, b_in).unwrap();
+    ge.current_graph_mut().connect(b_out, c_in).unwrap();
+
+    // Group B
+    let (group_node, _subgraph_id) = ge.group_nodes(&[b]).unwrap();
+
+    // Serialize root graph
+    let root_serialized = ge.current_graph().serialize();
+    let root_json = serde_json::to_string(&root_serialized).unwrap();
+    let root_data: crate::serialization::SerializedGraph = serde_json::from_str(&root_json).unwrap();
+    let root_restored = NodeGraph::deserialize(&root_data).unwrap();
+
+    // Root should have A, C, Group (3 nodes), 2 connections
+    assert_eq!(root_restored.node_count(), 3, "Root roundtrip: 3 nodes");
+    assert_eq!(root_restored.connection_count(), 2, "Root roundtrip: 2 connections");
+
+    // Serialize subgraph
+    ge.enter_group(group_node);
+    let sub_serialized = ge.current_graph().serialize();
+    let sub_json = serde_json::to_string(&sub_serialized).unwrap();
+    let sub_data: crate::serialization::SerializedGraph = serde_json::from_str(&sub_json).unwrap();
+    let sub_restored = NodeGraph::deserialize(&sub_data).unwrap();
+
+    // Subgraph should have IO nodes + B, with connections
+    assert!(sub_restored.node_count() >= 2, "Subgraph roundtrip: at least B + IO nodes, got {}", sub_restored.node_count());
+    assert!(sub_restored.connection_count() >= 1, "Subgraph roundtrip: at least 1 connection, got {}", sub_restored.connection_count());
+
+    // Verify node titles survived
+    let titles: Vec<String> = sub_restored.world.query::<NodeHeader>()
+        .map(|(_, h)| h.title.clone()).collect();
+    assert!(titles.iter().any(|t| t == "B"), "Subgraph should contain node B after roundtrip, got {:?}", titles);
+}
+
 // ============================================================
 // Acceptance Criterion 7: Change tracking
 // ============================================================

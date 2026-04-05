@@ -4,9 +4,11 @@ Blender-style node graph UI library built on dwind/dominator/futures-signals (Ru
 
 ## Architecture
 
-- **nodegraph-core**: Custom ECS store, graph model, interaction state machine, layout, serialization, search registry
-- **nodegraph-render**: SVG rendering via dominator, reactive signal bridge (GraphSignals), event handling, search menu UI
+- **nodegraph-core**: Custom ECS store, graph model, interaction state machine, layout, serialization, search registry, topological sort
+- **nodegraph-render**: SVG rendering via dominator, reactive signal bridge (GraphSignals), event handling, search menu UI, minimap
+- **nodegraph-widgets**: Compact inline input components (`float_input`, etc.) using `#[component]` macro
 - **nodegraph-demo**: Demo app with Blender-style node types
+- **examples/trivial-calculator**: Minimal example with graph evaluation and live JSON panel
 
 ### Core Principles
 - Pure FRP: DOM as computation over mutable state, no imperative sync
@@ -16,98 +18,55 @@ Blender-style node graph UI library built on dwind/dominator/futures-signals (Ru
 
 ## Completed
 
-### Phase 1 — ECS Store & Graph Schema
-- Custom ECS World with generational indices, typed component storage
-- CloneableStore trait for type-erased World::clone (enables snapshot undo)
-- NodeGraph facade: add_node, add_port, connect, disconnect, remove_node
+### Phase 1-7 — Core Graph System
+- Custom ECS World with generational indices, CloneableStore for snapshot undo
+- SVG rendering, pan/zoom, drag-to-connect, box select, cut links
+- Node type registry with search menu, noodle-drop-to-add
+- Node groups with subgraph navigation, individual IO nodes per connection
+- Frames with reactive bounds, reroute diamond rendering
+- Snapshot-based undo/redo
 
-### Phase 2 — Viewport, Layout & Interaction
-- Viewport with pan/zoom transforms
-- Layout constants: HEADER_HEIGHT, PORT_HEIGHT, PORT_RADIUS, NODE_MIN_WIDTH, REROUTE_SIZE
-- LayoutCache: precomputed node layouts, connection paths, frame rects
-- InteractionController state machine: Idle, Panning, DraggingNodes, ConnectingPort, BoxSelecting, CuttingLinks
-- Hit testing: ports > nodes > connections > frames
+### Phase 8 — Theme System & Minimap
+- Theme struct centralizing ~40 color/opacity values with `Theme::dark()`
+- Minimap with node rects, connection lines, viewport rect, click-to-pan
+- graph_bounds tracking, viewport_size
 
-### Phase 3 — Undo/Redo
-- ~~Command pattern~~ replaced by snapshot-based UndoHistory
-- UndoHistory: save() clones entire GraphEditor, undo/redo swap snapshots
-- Copy/paste via SerializedGraph (preserves IsReroute markers)
+### Phase 9 — API Stabilization (partial)
+- `add_node()` returns `(EntityId, Vec<EntityId>)` — port IDs immediately available
+- `add_node_typed()` sets `NodeTypeId` component for type dispatch
+- `connect_ports()` returns `Result<EntityId, ConnectionError>`
+- `spawn_from_registry()` stores `NodeTypeId` on nodes
+- `PortWidgetFn` receives `port_direction` and `node_type_id` arguments
+- `NodeGraph::topological_sort()` with cycle detection (Kahn's algorithm)
+- `NodeGraph::eval_order()` convenience method
+- `custom_node_body` and `port_widget` callbacks for user-defined rendering
+- `nodegraph-widgets` crate with `float_input` component
+- Trivial-calculator example with graph evaluation, inline widgets, live JSON
 
-### Phase 4 — Reactive Rendering
-- GraphSignals: central reactive bridge between ECS and DOM
-- Per-node Mutable for positions, headers; per-frame Mutable for bounds
-- SVG <g> per node, <circle> ports, bezier <path> connections
-- foreignObject for HTML content (header, port labels)
-
-### Phase 5 — SVG Rewrite & Full Interaction Suite
-- Pure SVG rendering (replaced HTML div approach)
-- Drag-to-connect with preview wire
-- Box selection, cut links (Ctrl+RMB polyline)
-- Port highlighting during drag (scale, glow, direction+type filtering)
-- Gradient stroke for type-conversion connections
-
-### Phase 6 — Node Type Registry & Search Menu
-- NodeTypeRegistry with search/filter/compatible port matching
-- Search menu (HTML overlay, not SVG — event propagation issues)
-- Text filtering, arrow navigation, Enter confirm, Escape close
-- Noodle-drop-to-add: filtered to compatible types, auto-connects after spawn
-- SocketType::Any for reroute pass-through compatibility
-- Click-outside-to-close via el.closest("[data-search-menu]")
-
-### Phase 7 — Node Groups & Subgraph Navigation
-- GraphEditor: HashMap<EntityId, NodeGraph> for multiple subgraphs
-- group_nodes(): moves nodes to subgraph, creates Group IO nodes, reconnects externals
-- ungroup(): restores nodes + connections via IO port mapping
-- Double-click group node to enter, breadcrumb navigation
-- adapt_group_io_port(): type adaptation when connecting to IO ports
-- O(1) caches: subgraph_parents, io_port_mapping
-
-### Frames & Reroutes
-- Frames: visual grouping with reactive bounds tracking member positions
-- Frame drag moves all member nodes, frame selection + Delete key
-- Reroute nodes: diamond polygon rendering, SocketType::Any pass-through
-- port_offset handles reroute diamond-edge coordinates
-
-### Polish & Fixes
-- Frame serialization (label, color, members) with roundtrip test
-- Signal map cleanup (node_positions, node_headers, frame_bounds) on subgraph navigation
-- Search menu opens at cursor position (not viewport center)
-- Search menu reactively filters by pending connection type (map_ref! over both signals)
-- Deduplicated FrameDeselect logic, broadcast() for frame selection signal
+### Polish
+- Delta-based full_sync (sync_entity_list with change detection)
+- Graph-switch detection (clears stale entity IDs on subgraph navigation)
+- Collapsed nodes explicitly hide port circles
+- Selection state: select_single uses sync_selection
+- Reroute layout in compute_node_layout (diamond-edge port positions)
+- Frame selection/deletion, serialization roundtrip
+- Search menu reactively filters by pending connection type
 
 ## Current State
 
-- **165 tests** (94 core + 71 wasm), all passing
-- **93% line coverage** on nodegraph-core
+- **180 tests** (95 core + 79 wasm + 6 theme/minimap), all passing
 
 ## Remaining Work
 
-### Phase 8 — Minimap & Theme System
-- [ ] Minimap: scaled-down overview of the graph, viewport rectangle indicator, click-to-navigate
-- [ ] Theme system: configurable colors, fonts, sizes via a Theme struct
-- [ ] Dark/light theme support
-- [ ] Node color customization (per-type via registry)
-
-### Phase 9 — API Stabilization & Docs
+### Phase 9 — API Stabilization (remaining)
 - [ ] Public API review: hide internal types, clean up pub visibility
-- [ ] Builder pattern for node construction
 - [ ] Event callbacks: on_connect, on_disconnect, on_selection_changed, on_node_moved
 - [ ] Documentation: rustdoc on public types, usage examples
-- [ ] Serialize/deserialize full GraphEditor (including subgraphs, not just single NodeGraph)
+- [ ] Serialize/deserialize full GraphEditor (including subgraph hierarchy metadata)
+- [ ] Light theme variant
 
-### Known Rough Edges
-- [ ] full_sync DOM thrashing: rebuilds entire node/connection/frame lists on every undo/redo
-- [ ] Selection state duplication: InteractionController.selection vs GraphSignals.selection
-- [ ] Collapse visual: collapsed nodes don't hide port circles in SVG
-- [ ] Frame renaming: no UI to rename a frame after creation
-- [ ] Frame color picker: no UI to change frame color
-- [ ] node_positions/node_headers HashMaps leak on subgraph navigation (retain added for full_sync, but sync_all_positions still iterates stale entries)
-- [ ] Reroute type narrowing: Any passes everything through without type propagation (by design, but Blender narrows)
-
-### Testing Gaps
-- [ ] Frame title rendering (foreignObject) — no DOM test
-- [ ] Reroute diamond rendering — no DOM test verifying SVG polygon
-- [ ] port_offset for reroutes — no test verifying exact coordinates
-- [ ] Frame redo cycle — only undo tested
-- [ ] Multiple reroutes in series (A→R1→R2→B)
-- [ ] Serialization roundtrip for full GraphEditor with subgraphs
+### Nice-to-have
+- [ ] Frame renaming UI
+- [ ] Frame color picker UI
+- [ ] Right-click context menu
+- [ ] Drag reroute onto wire to insert
