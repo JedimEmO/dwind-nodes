@@ -2042,16 +2042,16 @@ fn test_delete_selected_frame() {
 
     assert_eq!(gs.selected_frames.get_cloned().len(), 1, "Frame should be selected");
 
-    // Delete — should remove frame AND selected member nodes
+    // Delete — should remove frame only, NOT member nodes
     gs.delete_selected();
 
     assert_eq!(gs.with_graph(|g| g.frame_count()), 0, "Frame should be deleted");
-    assert_eq!(gs.node_count(), 0, "Member nodes should also be deleted");
+    assert_eq!(gs.node_count(), 2, "Member nodes should survive frame deletion");
 
-    // Undo restores everything
+    // Undo restores the frame
     gs.undo();
     assert_eq!(gs.with_graph(|g| g.frame_count()), 1, "Frame restored after undo");
-    assert_eq!(gs.node_count(), 2, "Nodes restored after undo");
+    assert_eq!(gs.node_count(), 2, "Nodes still intact after undo");
 }
 
 // ── Noodle-drop search menu DOM shows only compatible nodes ──────────

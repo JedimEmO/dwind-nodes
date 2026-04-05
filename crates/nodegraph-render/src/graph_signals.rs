@@ -723,16 +723,21 @@ impl GraphSignals {
         let selected_frames = self.selected_frames.get_cloned();
         if selected_nodes.is_empty() && selected_frames.is_empty() { return; }
         self.save_undo();
-        for &nid in &selected_nodes {
-            // Auto-reconnect: bridge upstream→downstream before deleting
-            let bridges = self.find_bridge_connections(nid);
-            self.with_graph_mut(|g| g.remove_node(nid));
-            for (upstream, downstream) in bridges {
-                let _ = self.connect_ports_no_undo(upstream, downstream);
+
+        // If frames are selected, only delete frames (not their member nodes).
+        // Nodes are only deleted when explicitly selected without a frame.
+        if !selected_frames.is_empty() {
+            for &fid in &selected_frames { self.with_graph_mut(|g| g.remove_frame(fid)); }
+            self.selected_frames.set(Vec::new());
+        } else {
+            for &nid in &selected_nodes {
+                let bridges = self.find_bridge_connections(nid);
+                self.with_graph_mut(|g| g.remove_node(nid));
+                for (upstream, downstream) in bridges {
+                    let _ = self.connect_ports_no_undo(upstream, downstream);
+                }
             }
         }
-        for &fid in &selected_frames { self.with_graph_mut(|g| g.remove_frame(fid)); }
-        self.selected_frames.set(Vec::new());
         self.full_sync();
     }
 

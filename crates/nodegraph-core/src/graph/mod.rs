@@ -394,8 +394,8 @@ pub struct GraphEditor {
     /// subgraph_id → (parent_graph_id, group_node_id)
     pub subgraph_parents: HashMap<EntityId, (EntityId, EntityId)>,
     /// Bidirectional mapping: subgraph IO port ↔ parent group node port.
-    /// Key: IO port in subgraph, Value: corresponding port on group node in parent.
-    pub io_port_mapping: HashMap<EntityId, EntityId>,
+    /// Key: (subgraph_id, IO port in subgraph), Value: corresponding port on group node in parent.
+    pub io_port_mapping: HashMap<(EntityId, EntityId), EntityId>,
 }
 
 impl GraphEditor {
@@ -659,10 +659,10 @@ impl GraphEditor {
         // Cache parent/child mappings
         self.subgraph_parents.insert(subgraph_id, (current_id, group_node));
         for (i, &sub_port) in sub_input_ports.iter().enumerate() {
-            self.io_port_mapping.insert(sub_port, group_input_ports[i]);
+            self.io_port_mapping.insert((subgraph_id, sub_port), group_input_ports[i]);
         }
         for (i, &sub_port) in sub_output_ports.iter().enumerate() {
-            self.io_port_mapping.insert(sub_port, group_output_ports[i]);
+            self.io_port_mapping.insert((subgraph_id, sub_port), group_output_ports[i]);
         }
 
         Some((group_node, subgraph_id))
@@ -765,11 +765,10 @@ impl GraphEditor {
 
         // Reconnect externals: IO port → mapped to group port → mapped to internal port → new port
         for (ext_src, group_in_port) in &external_inputs {
-            // group_in_port is on the (now removed) group node
             // Find the IO port that corresponds to this group port
-            if let Some(&io_port) = self.io_port_mapping.iter()
+            if let Some(io_port) = self.io_port_mapping.iter()
                 .find(|(_, &gp)| gp == *group_in_port)
-                .map(|(ip, _)| ip)
+                .map(|((_, ip), _)| *ip)
             {
                 if let Some(&internal_old) = io_to_internal.get(&io_port) {
                     if let Some(&new_tgt) = old_to_new.get(&internal_old) {
@@ -779,9 +778,9 @@ impl GraphEditor {
             }
         }
         for (group_out_port, ext_tgt) in &external_outputs {
-            if let Some(&io_port) = self.io_port_mapping.iter()
+            if let Some(io_port) = self.io_port_mapping.iter()
                 .find(|(_, &gp)| gp == *group_out_port)
-                .map(|(ip, _)| ip)
+                .map(|((_, ip), _)| *ip)
             {
                 if let Some(&internal_old) = io_to_internal.get(&io_port) {
                     if let Some(&new_src) = old_to_new.get(&internal_old) {
@@ -793,10 +792,7 @@ impl GraphEditor {
 
         // Clean up caches
         self.subgraph_parents.remove(&subgraph_id);
-        self.io_port_mapping.retain(|sub_port, _| {
-            // Remove mappings for ports that were in this subgraph
-            !nodes_to_move.iter().any(|(_, _, ports)| ports.iter().any(|(_, _, _, pid)| pid == sub_port))
-        });
+        self.io_port_mapping.retain(|(sid, _), _| *sid != subgraph_id);
 
         // Remove the subgraph
         self.graphs.remove(&subgraph_id);
@@ -837,7 +833,7 @@ impl GraphEditor {
             GroupIOKind::Output => parent.add_port(group_node_id, PortDirection::Output, socket_type, label),
         };
 
-        self.io_port_mapping.insert(sub_port, parent_port);
+        self.io_port_mapping.insert((current_id, sub_port), parent_port);
         Some(io_node)
     }
 
@@ -852,8 +848,8 @@ impl GraphEditor {
             sub.world.insert(io_port_id, PortSocketType(new_type));
         }
 
-        // Find the corresponding parent port via the explicit mapping (O(1), no index guessing)
-        let parent_port = match self.io_port_mapping.get(&io_port_id) {
+        // Find the corresponding parent port via the explicit mapping
+        let parent_port = match self.io_port_mapping.get(&(current_id, io_port_id)) {
             Some(&p) => p,
             None => return, // not a mapped IO port
         };
@@ -951,8 +947,8 @@ impl GraphEditor {
             }
         }
 
-        // Rebuild io_port_mapping
-        let mut io_port_mapping: HashMap<EntityId, EntityId> = HashMap::new();
+        // Rebuild io_port_mapping (keyed by (subgraph_id, io_port_id))
+        let mut io_port_mapping: HashMap<(EntityId, EntityId), EntityId> = HashMap::new();
 
         for (&subgraph_id, &(parent_id, group_node_id)) in &subgraph_parents {
             let parent_graph = graphs.get(&parent_id);
@@ -979,12 +975,12 @@ impl GraphEditor {
 
                 for (i, &io_port) in input_io_ports.iter().enumerate() {
                     if let Some(&group_port) = group_inputs.get(i) {
-                        io_port_mapping.insert(io_port, group_port);
+                        io_port_mapping.insert((subgraph_id, io_port), group_port);
                     }
                 }
                 for (i, &io_port) in output_io_ports.iter().enumerate() {
                     if let Some(&group_port) = group_outputs.get(i) {
-                        io_port_mapping.insert(io_port, group_port);
+                        io_port_mapping.insert((subgraph_id, io_port), group_port);
                     }
                 }
             }
