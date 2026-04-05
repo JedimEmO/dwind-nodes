@@ -211,6 +211,32 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
         // Context menu (HTML, screen space)
         .child(render_context_menu(&gs))
 
+        // Help button (bottom-left corner)
+        .child(html!("div", {
+            .style("position", "absolute")
+            .style("bottom", "8px")
+            .style("left", "8px")
+            .style("z-index", "50")
+            .style("width", "28px")
+            .style("height", "28px")
+            .style("border-radius", "14px")
+            .style("background", "rgba(30, 30, 48, 0.8)")
+            .style("border", &format!("1px solid {}", gs.theme.menu_border))
+            .style("display", "flex")
+            .style("align-items", "center")
+            .style("justify-content", "center")
+            .style("cursor", "pointer")
+            .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
+            .style("font-size", "14px")
+            .style("font-weight", "bold")
+            .style("color", "#888")
+            .style("pointer-events", "auto")
+            .text("?")
+            .event(clone!(gs => move |_: events::Click| {
+                gs.show_help.set(!gs.show_help.get());
+            }))
+        }))
+
         // Keyboard shortcut help overlay (? to toggle)
         .child(html!("div", {
             .style("position", "absolute")
