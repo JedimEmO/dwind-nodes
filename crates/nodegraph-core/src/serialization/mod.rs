@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::graph::{NodeGraph, ConnectionError};
+use crate::graph::{NodeGraph, ConnectionError, GroupIOKind};
+use crate::graph::group::SubgraphRoot;
 use crate::store::EntityId;
 use crate::types::socket_type::SocketType;
 use crate::graph::node::NodeHeader;
@@ -21,6 +23,10 @@ pub struct SerializedNode {
     pub ports: Vec<SerializedPort>,
     #[serde(default)]
     pub is_reroute: bool,
+    #[serde(default)]
+    pub subgraph_id: Option<u32>,
+    #[serde(default)]
+    pub group_io_kind: Option<GroupIOKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +49,14 @@ pub struct SerializedFrame {
     pub label: String,
     pub color: [u8; 3],
     pub member_node_ids: Vec<u32>,
+}
+
+/// Full graph editor state including subgraph hierarchy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializedGraphEditor {
+    pub root_graph_id: u32,
+    pub graphs: HashMap<u32, SerializedGraph>,
+    pub next_graph_id: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,12 +99,17 @@ impl NodeGraph {
             }
 
             let is_reroute = self.world.get::<crate::graph::reroute::IsReroute>(node_id).is_some();
+            let subgraph_id = self.world.get::<SubgraphRoot>(node_id).map(|s| s.0.index);
+            let group_io_kind = self.world.get::<GroupIOKind>(node_id).cloned();
+
             nodes.push(SerializedNode {
                 id: node_id.index,
                 header: header.clone(),
                 position: pos,
                 ports,
                 is_reroute,
+                subgraph_id,
+                group_io_kind,
             });
         }
 
@@ -119,8 +138,6 @@ impl NodeGraph {
     }
 
     pub fn deserialize(data: &SerializedGraph) -> Result<Self, DeserializeError> {
-        use std::collections::HashMap;
-
         let mut graph = NodeGraph::new();
         let mut id_map: HashMap<u32, EntityId> = HashMap::new();
 
@@ -132,6 +149,20 @@ impl NodeGraph {
             }
             if snode.is_reroute {
                 graph.world.insert(node_id, crate::graph::reroute::IsReroute);
+            }
+            // SubgraphRoot restored later (needs graph_id mapping)
+            // GroupIOKind restored here
+            if let Some(ref kind) = snode.group_io_kind {
+                graph.world.insert(node_id, kind.clone());
+                // Derive GroupIOLabel from title prefix
+                let label = if snode.header.title.starts_with("In: ") {
+                    snode.header.title.strip_prefix("In: ").unwrap_or("").to_string()
+                } else if snode.header.title.starts_with("Out: ") {
+                    snode.header.title.strip_prefix("Out: ").unwrap_or("").to_string()
+                } else {
+                    String::new()
+                };
+                graph.world.insert(node_id, crate::graph::group::GroupIOLabel(label));
             }
             id_map.insert(snode.id, node_id);
 
@@ -169,3 +200,6 @@ impl NodeGraph {
         Ok(graph)
     }
 }
+
+// GraphEditor::serialize_editor() and deserialize_editor() are in graph/mod.rs
+// (they need access to private GraphEditor fields)

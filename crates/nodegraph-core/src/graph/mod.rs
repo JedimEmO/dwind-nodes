@@ -872,6 +872,119 @@ impl GraphEditor {
         }
         "Group".to_string()
     }
+
+    /// Serialize the entire editor including all subgraphs.
+    pub fn serialize_editor(&self) -> crate::serialization::SerializedGraphEditor {
+        let mut graphs = std::collections::HashMap::new();
+        for (&graph_id, graph) in &self.graphs {
+            graphs.insert(graph_id.index, graph.serialize());
+        }
+        crate::serialization::SerializedGraphEditor {
+            root_graph_id: self.root_graph_id.index,
+            graphs,
+            next_graph_id: self.next_graph_id,
+        }
+    }
+
+    /// Deserialize a full editor with subgraph hierarchy.
+    pub fn deserialize_editor(data: &crate::serialization::SerializedGraphEditor) -> Result<Self, crate::serialization::DeserializeError> {
+        use crate::graph::port::PortDirection;
+
+        let mut graphs: HashMap<EntityId, NodeGraph> = HashMap::new();
+        let mut graph_id_map: HashMap<u32, EntityId> = HashMap::new();
+
+        for (&old_graph_id, sgraph) in &data.graphs {
+            let graph = NodeGraph::deserialize(sgraph)?;
+            let new_graph_id = EntityId { index: old_graph_id, generation: Default::default() };
+            graphs.insert(new_graph_id, graph);
+            graph_id_map.insert(old_graph_id, new_graph_id);
+        }
+
+        let root_graph_id = *graph_id_map.get(&data.root_graph_id)
+            .unwrap_or(&EntityId { index: data.root_graph_id, generation: Default::default() });
+
+        // Restore SubgraphRoot and build subgraph_parents cache
+        let mut subgraph_parents: HashMap<EntityId, (EntityId, EntityId)> = HashMap::new();
+
+        for (&old_graph_id, sgraph) in &data.graphs {
+            let parent_graph_id = *graph_id_map.get(&old_graph_id).unwrap();
+            let graph = graphs.get(&parent_graph_id).unwrap();
+
+            for snode in &sgraph.nodes {
+                if let Some(old_subgraph_id) = snode.subgraph_id {
+                    if let Some(&new_subgraph_id) = graph_id_map.get(&old_subgraph_id) {
+                        for (node_id, header) in graph.world.query::<NodeHeader>() {
+                            if header.title == snode.header.title {
+                                let pos = graph.world.get::<node::NodePosition>(node_id);
+                                if let Some(p) = pos {
+                                    if (p.x - snode.position.0).abs() < 0.01 && (p.y - snode.position.1).abs() < 0.01 {
+                                        subgraph_parents.insert(new_subgraph_id, (parent_graph_id, node_id));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Insert SubgraphRoot components
+        for (&subgraph_id, &(parent_id, group_node_id)) in &subgraph_parents {
+            if let Some(graph) = graphs.get_mut(&parent_id) {
+                graph.world.insert(group_node_id, group::SubgraphRoot(subgraph_id));
+            }
+        }
+
+        // Rebuild io_port_mapping
+        let mut io_port_mapping: HashMap<EntityId, EntityId> = HashMap::new();
+
+        for (&subgraph_id, &(parent_id, group_node_id)) in &subgraph_parents {
+            let parent_graph = graphs.get(&parent_id);
+            let sub_graph = graphs.get(&subgraph_id);
+            if let (Some(parent), Some(sub)) = (parent_graph, sub_graph) {
+                let group_ports = parent.node_ports(group_node_id).to_vec();
+                let group_inputs: Vec<EntityId> = group_ports.iter().filter(|&&pid| {
+                    parent.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Input)
+                }).copied().collect();
+                let group_outputs: Vec<EntityId> = group_ports.iter().filter(|&&pid| {
+                    parent.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Output)
+                }).copied().collect();
+
+                let mut input_io_ports: Vec<EntityId> = Vec::new();
+                let mut output_io_ports: Vec<EntityId> = Vec::new();
+                for (nid, kind) in sub.world.query::<GroupIOKind>() {
+                    for &pid in sub.node_ports(nid) {
+                        match kind {
+                            GroupIOKind::Input => input_io_ports.push(pid),
+                            GroupIOKind::Output => output_io_ports.push(pid),
+                        }
+                    }
+                }
+
+                for (i, &io_port) in input_io_ports.iter().enumerate() {
+                    if let Some(&group_port) = group_inputs.get(i) {
+                        io_port_mapping.insert(io_port, group_port);
+                    }
+                }
+                for (i, &io_port) in output_io_ports.iter().enumerate() {
+                    if let Some(&group_port) = group_outputs.get(i) {
+                        io_port_mapping.insert(io_port, group_port);
+                    }
+                }
+            }
+        }
+
+        Ok(GraphEditor {
+            graphs,
+            root_graph_id,
+            current_graph_id: root_graph_id,
+            breadcrumb: vec![root_graph_id],
+            next_graph_id: data.next_graph_id,
+            subgraph_parents,
+            io_port_mapping,
+        })
+    }
 }
 
 impl Default for GraphEditor {

@@ -112,7 +112,7 @@ pub fn copy_nodes(graph: &NodeGraph, node_ids: &[EntityId]) -> SerializedGraph {
             }
         }
         let is_reroute = graph.world.get::<crate::graph::reroute::IsReroute>(node_id).is_some();
-        nodes.push(SerializedNode { id: node_id.index, header, position: pos, ports, is_reroute });
+        nodes.push(SerializedNode { id: node_id.index, header, position: pos, ports, is_reroute, subgraph_id: None, group_io_kind: None });
     }
     SerializedGraph { nodes, connections, frames: Vec::new() }
 }

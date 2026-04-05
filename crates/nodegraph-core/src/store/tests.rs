@@ -556,6 +556,61 @@ fn serialization_roundtrip_with_subgraphs() {
     assert!(titles.iter().any(|t| t == "B"), "Subgraph should contain node B after roundtrip, got {:?}", titles);
 }
 
+#[test]
+fn graph_editor_full_roundtrip() {
+    use crate::graph::GraphEditor;
+    use crate::graph::GroupIOKind;
+    use crate::graph::group::SubgraphRoot;
+
+    let mut ge = GraphEditor::new();
+
+    // Build A → B → C chain
+    let a = ge.current_graph_mut().add_node("A", (0.0, 0.0));
+    let a_out = ge.current_graph_mut().add_port(a, PortDirection::Output, SocketType::Float, "Out");
+    let b = ge.current_graph_mut().add_node("B", (200.0, 0.0));
+    let b_in = ge.current_graph_mut().add_port(b, PortDirection::Input, SocketType::Float, "In");
+    let b_out = ge.current_graph_mut().add_port(b, PortDirection::Output, SocketType::Float, "Out");
+    let c = ge.current_graph_mut().add_node("C", (400.0, 0.0));
+    let c_in = ge.current_graph_mut().add_port(c, PortDirection::Input, SocketType::Float, "In");
+    ge.current_graph_mut().connect(a_out, b_in).unwrap();
+    ge.current_graph_mut().connect(b_out, c_in).unwrap();
+
+    // Group B
+    let (group_node, _subgraph_id) = ge.group_nodes(&[b]).unwrap();
+
+    // Serialize entire editor
+    let serialized = ge.serialize_editor();
+    let json = serde_json::to_string_pretty(&serialized).unwrap();
+    let data: crate::serialization::SerializedGraphEditor = serde_json::from_str(&json).unwrap();
+
+    // Deserialize
+    let restored = GraphEditor::deserialize_editor(&data).unwrap();
+
+    // Root graph should have A, C, Group (3 nodes), 2 connections
+    assert_eq!(restored.current_graph().node_count(), 3, "Root: 3 nodes");
+    assert_eq!(restored.current_graph().connection_count(), 2, "Root: 2 connections");
+
+    // Should have a group node with SubgraphRoot
+    let group_count = restored.current_graph().world.query::<SubgraphRoot>().count();
+    assert_eq!(group_count, 1, "Root should have 1 group node with SubgraphRoot");
+
+    // Should have 2 graphs total (root + subgraph)
+    assert_eq!(data.graphs.len(), 2, "Should serialize 2 graphs");
+
+    // Enter the group and verify subgraph
+    let group_node_id = restored.current_graph().world.query::<SubgraphRoot>()
+        .map(|(id, _)| id).next().unwrap();
+    let mut restored = restored;
+    assert!(restored.enter_group(group_node_id), "Should be able to enter group");
+
+    // Subgraph should have B + IO nodes
+    assert!(restored.current_graph().node_count() >= 2, "Subgraph should have B + IO nodes");
+
+    // IO nodes should have GroupIOKind
+    let io_count = restored.current_graph().world.query::<GroupIOKind>().count();
+    assert!(io_count >= 1, "Subgraph should have IO nodes with GroupIOKind, got {}", io_count);
+}
+
 // ============================================================
 // Acceptance Criterion 7: Change tracking
 // ============================================================
