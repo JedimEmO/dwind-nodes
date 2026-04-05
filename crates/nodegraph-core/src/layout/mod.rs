@@ -146,10 +146,13 @@ pub fn compute_node_layout(graph: &NodeGraph, node_id: EntityId) -> Option<Compu
     }
 
     let num_rows = inputs.len().max(outputs.len());
+    let custom_body_h = graph.world.get::<crate::graph::node::CustomBodyHeight>(node_id)
+        .map(|h| h.0)
+        .unwrap_or(0.0);
     let body_height = if header.collapsed {
         0.0
     } else {
-        num_rows as f64 * PORT_HEIGHT
+        num_rows as f64 * PORT_HEIGHT + custom_body_h
     };
 
     let node_width = NODE_MIN_WIDTH;

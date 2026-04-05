@@ -70,6 +70,14 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
         )
 
         .event(clone!(gs, container_rect => move |e: events::MouseDown| {
+            // Let port widgets (float scrub, color picker) handle their own events
+            if let Some(target) = e.target() {
+                if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                    if el.closest("[data-port-widget]").ok().flatten().is_some() {
+                        return;
+                    }
+                }
+            }
             // Close context menu on click outside
             if gs.context_menu.get().is_some() {
                 if let Some(target) = e.target() {

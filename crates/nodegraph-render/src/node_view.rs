@@ -62,7 +62,13 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     let collapsed = header.collapsed;
     let num_rows = if collapsed { 0 } else { input_ports.len().max(output_ports.len()) };
     let has_custom_body = gs.custom_node_body.borrow().is_some();
-    let custom_body_height = if has_custom_body { PORT_HEIGHT } else { 0.0 };
+    let custom_body_height = if has_custom_body {
+        gs.with_graph(|g| {
+            g.world.get::<nodegraph_core::graph::node::CustomBodyHeight>(node_id)
+                .map(|h| h.0)
+                .unwrap_or(PORT_HEIGHT)
+        })
+    } else { 0.0 };
     let total_height = HEADER_HEIGHT + num_rows as f64 * PORT_HEIGHT + custom_body_height;
     let [hr, hg, hb] = header.color;
 

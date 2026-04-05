@@ -41,6 +41,17 @@ impl EntityAllocator {
         }
     }
 
+    /// Create an allocator that starts allocating entity indices from `start`.
+    /// Indices 0..start are reserved (dead) so they never collide with other allocators.
+    pub fn new_with_start(start: u32) -> Self {
+        let n = start as usize;
+        Self {
+            generations: vec![Generation::new(); n],
+            free_list: Vec::new(),
+            alive: vec![false; n],
+        }
+    }
+
     pub fn allocate(&mut self) -> EntityId {
         if let Some(index) = self.free_list.pop() {
             self.alive[index as usize] = true;

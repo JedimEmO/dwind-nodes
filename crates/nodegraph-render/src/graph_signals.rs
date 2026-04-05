@@ -81,6 +81,9 @@ pub struct GraphSignals {
     pub on_selection_changed: RefCell<Option<Box<dyn Fn(&[EntityId])>>>,
     /// Called when nodes are moved. Args: (vec of (node_id, x, y)).
     pub on_node_moved: RefCell<Option<Box<dyn Fn(&[(EntityId, f64, f64)])>>>,
+    /// Called after a node is spawned from the registry (e.g., via search menu).
+    /// Args: (node_id, type_id, port_ids).
+    pub on_node_spawned: RefCell<Option<Box<dyn Fn(EntityId, &str, &[EntityId])>>>,
 
     // === Internal state (hidden from docs, used by rendering modules) ===
 
@@ -152,6 +155,7 @@ impl GraphSignals {
             on_disconnect: RefCell::new(None),
             on_selection_changed: RefCell::new(None),
             on_node_moved: RefCell::new(None),
+            on_node_spawned: RefCell::new(None),
         })
     }
 
@@ -260,6 +264,10 @@ impl GraphSignals {
         }
         self.pending_connection.set(None);
         self.search_menu.set(None);
+
+        if let Some(cb) = self.on_node_spawned.borrow().as_ref() {
+            cb(node_id, &type_id_owned, &new_ports);
+        }
     }
 
     pub fn connect_ports(&self, source: EntityId, target: EntityId) -> Result<EntityId, nodegraph_core::graph::ConnectionError> {

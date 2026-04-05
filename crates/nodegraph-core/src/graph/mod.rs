@@ -8,7 +8,7 @@ pub mod reroute;
 use std::collections::HashMap;
 use crate::store::{EntityId, World};
 use crate::types::socket_type::SocketType;
-use node::{NodeHeader, NodePosition};
+use node::{NodeHeader, NodePosition, NodeTypeId};
 use port::{PortDirection, PortOwner, PortSocketType, PortLabel, PortIndex};
 use connection::ConnectionEndpoints;
 
@@ -44,6 +44,14 @@ impl NodeGraph {
     pub fn new() -> Self {
         Self {
             world: World::new(),
+            ports_by_node: HashMap::new(),
+            connections_by_port: HashMap::new(),
+        }
+    }
+
+    pub fn new_with_start(start_index: u32) -> Self {
+        Self {
+            world: World::new_with_start(start_index),
             ports_by_node: HashMap::new(),
             connections_by_port: HashMap::new(),
         }
@@ -391,6 +399,9 @@ pub struct GraphEditor {
     current_graph_id: EntityId,
     breadcrumb: Vec<EntityId>,
     next_graph_id: u32,
+    /// Counter for assigning unique entity ID ranges to subgraphs.
+    /// Each subgraph gets entity IDs starting from `next_entity_start`.
+    next_entity_start: u32,
     /// subgraph_id → (parent_graph_id, group_node_id)
     pub subgraph_parents: HashMap<EntityId, (EntityId, EntityId)>,
     /// Bidirectional mapping: subgraph IO port ↔ parent group node port.
@@ -412,6 +423,7 @@ impl GraphEditor {
             current_graph_id: root_id,
             breadcrumb: vec![root_id],
             next_graph_id: 1,
+            next_entity_start: 10000,
             subgraph_parents: HashMap::new(),
             io_port_mapping: HashMap::new(),
         }
@@ -485,7 +497,9 @@ impl GraphEditor {
         if node_ids.is_empty() { return None; }
 
         let subgraph_id = self.alloc_graph_id();
-        let mut subgraph = NodeGraph::new();
+        let start = self.next_entity_start;
+        self.next_entity_start += 10000;
+        let mut subgraph = NodeGraph::new_with_start(start);
 
         let current_id = self.current_graph_id;
         let parent = self.graphs.get_mut(&current_id)?;
@@ -615,6 +629,14 @@ impl GraphEditor {
             if let Some(h) = subgraph.world.get_mut::<NodeHeader>(new_nid) {
                 h.color = header.color;
                 h.collapsed = header.collapsed;
+            }
+
+            // Preserve NodeTypeId and CustomBodyHeight
+            if let Some(tid) = parent.world.get::<NodeTypeId>(nid).cloned() {
+                subgraph.world.insert(new_nid, tid);
+            }
+            if let Some(cbh) = parent.world.get::<node::CustomBodyHeight>(nid).cloned() {
+                subgraph.world.insert(new_nid, cbh);
             }
 
             // Recreate ports
@@ -989,6 +1011,7 @@ impl GraphEditor {
             current_graph_id: root_graph_id,
             breadcrumb: vec![root_graph_id],
             next_graph_id: data.next_graph_id,
+            next_entity_start: data.next_graph_id as u32 * 10000 + 10000,
             subgraph_parents,
             io_port_mapping,
         })

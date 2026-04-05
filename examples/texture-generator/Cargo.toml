@@ -1,0 +1,25 @@
+[package]
+name = "texture-generator"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nodegraph-core = { path = "../../crates/nodegraph-core" }
+nodegraph-render = { path = "../../crates/nodegraph-render" }
+nodegraph-widgets = { workspace = true }
+wasm-bindgen = { workspace = true }
+dominator = { workspace = true }
+dwind = { workspace = true }
+console_error_panic_hook = { workspace = true }
+futures-signals = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+web-sys = { version = "0.3", features = [
+    "HtmlCanvasElement",
+    "HtmlInputElement",
+    "CanvasRenderingContext2d",
+    "ImageData",
+] }
+js-sys = "0.3"
