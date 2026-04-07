@@ -12,16 +12,6 @@ impl TextureBuffer {
         }
     }
 
-    pub fn filled(color: [u8; 4]) -> Self {
-        Self {
-            data: vec![color; TEX_SIZE * TEX_SIZE],
-        }
-    }
-
-    pub fn get(&self, x: usize, y: usize) -> [u8; 4] {
-        self.data[y * TEX_SIZE + x]
-    }
-
     pub fn set(&mut self, x: usize, y: usize, color: [u8; 4]) {
         self.data[y * TEX_SIZE + x] = color;
     }
