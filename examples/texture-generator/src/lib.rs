@@ -105,7 +105,7 @@ pub fn main() {
 
 fn run_evaluation(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>, canvases: &CanvasRegistry) {
     let result = eval::evaluate(gs, params);
-    preview::update_previews(canvases, &result.textures);
+    preview::update_previews(canvases, &result.textures, gs);
 }
 
 struct SceneNodes {

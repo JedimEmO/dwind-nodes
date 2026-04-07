@@ -423,7 +423,7 @@ impl GraphEditor {
             current_graph_id: root_id,
             breadcrumb: vec![root_id],
             next_graph_id: 1,
-            next_entity_start: 10000,
+            next_entity_start: 1_000_000,
             subgraph_parents: HashMap::new(),
             io_port_mapping: HashMap::new(),
         }
@@ -498,7 +498,7 @@ impl GraphEditor {
 
         let subgraph_id = self.alloc_graph_id();
         let start = self.next_entity_start;
-        self.next_entity_start += 10000;
+        self.next_entity_start += 1_000_000;
         let mut subgraph = NodeGraph::new_with_start(start);
 
         let current_id = self.current_graph_id;
@@ -675,6 +675,12 @@ impl GraphEditor {
         for &nid in node_ids {
             parent.remove_node(nid);
         }
+
+        debug_assert!(
+            subgraph.world.entity_count() < 1_000_000,
+            "Subgraph entity count {} exceeds block size — risk of ID collision",
+            subgraph.world.entity_count()
+        );
 
         self.graphs.insert(subgraph_id, subgraph);
 
@@ -1011,7 +1017,7 @@ impl GraphEditor {
             current_graph_id: root_graph_id,
             breadcrumb: vec![root_graph_id],
             next_graph_id: data.next_graph_id,
-            next_entity_start: data.next_graph_id as u32 * 10000 + 10000,
+            next_entity_start: data.next_graph_id as u32 * 1_000_000 + 1_000_000,
             subgraph_parents,
             io_port_mapping,
         })

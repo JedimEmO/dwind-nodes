@@ -3,20 +3,22 @@ use std::rc::Rc;
 
 use nodegraph_core::EntityId;
 use nodegraph_core::graph::node::NodeTypeId;
-use nodegraph_core::graph::port::{PortDirection, PortLabel, PortOwner};
+use nodegraph_core::graph::port::{PortDirection, PortLabel, PortSocketType};
 use nodegraph_core::graph::connection::ConnectionEndpoints;
 use nodegraph_core::graph::group::SubgraphRoot;
 use nodegraph_core::graph::{GroupIOKind, NodeGraph};
+use nodegraph_core::types::socket_type::SocketType;
 use nodegraph_render::GraphSignals;
 
 use crate::params::ParamStore;
 use crate::texture::{TextureBuffer, TEX_SIZE};
 
 pub struct EvalResult {
+    /// Textures keyed by **output port** EntityId.
     pub textures: HashMap<EntityId, Rc<TextureBuffer>>,
 }
 
-/// Evaluate the entire graph (including subgraphs) and return textures keyed by node EntityId.
+/// Evaluate the entire graph (including subgraphs) and return textures keyed by output port.
 pub fn evaluate(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> EvalResult {
     let mut textures: HashMap<EntityId, Rc<TextureBuffer>> = HashMap::new();
     let mut colors: HashMap<EntityId, [u8; 4]> = HashMap::new();
@@ -30,7 +32,6 @@ pub fn evaluate(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> EvalResult {
     EvalResult { textures }
 }
 
-/// Evaluate a single graph level, recursing into groups.
 fn eval_graph(
     graph: &NodeGraph,
     editor: &nodegraph_core::graph::GraphEditor,
@@ -41,9 +42,12 @@ fn eval_graph(
     let eval_order = graph.eval_order();
 
     for node_id in eval_order {
-        // Check if this is a group node
         if let Some(sub_root) = graph.world.get::<SubgraphRoot>(node_id) {
             eval_group_node(node_id, sub_root.0, graph, editor, params, textures, colors);
+            continue;
+        }
+
+        if graph.world.get::<GroupIOKind>(node_id).is_some() {
             continue;
         }
 
@@ -51,16 +55,10 @@ fn eval_graph(
             .map(|t| t.0.clone())
             .unwrap_or_default();
 
-        // Skip Group IO nodes — they're handled by eval_group_node
-        if graph.world.get::<GroupIOKind>(node_id).is_some() {
-            continue;
-        }
-
         eval_node(node_id, &type_id, graph, params, textures, colors);
     }
 }
 
-/// Evaluate a group node by running its subgraph.
 fn eval_group_node(
     group_node_id: EntityId,
     subgraph_id: EntityId,
@@ -75,32 +73,25 @@ fn eval_group_node(
         None => return,
     };
 
-    // Map group node input values → subgraph Group Input IO node outputs.
-    // For each input port on the group node, find the connected upstream value,
-    // then find the corresponding IO port in the subgraph and inject the value.
+    // Map group node input port values → subgraph Group Input IO node output ports.
     for &gport in parent_graph.node_ports(group_node_id) {
         let dir = parent_graph.world.get::<PortDirection>(gport).copied().unwrap_or(PortDirection::Output);
         if dir != PortDirection::Input { continue; }
 
-        // Find what's connected to this group input port
         let upstream_color = find_upstream(gport, parent_graph, colors);
         let upstream_tex = find_upstream(gport, parent_graph, textures);
 
-        // Find corresponding IO port in subgraph via io_port_mapping
-        // The mapping is (subgraph_id, io_port) → group_port
-        // We need the reverse: group_port → io_port
+        // Reverse-lookup: group_port → subgraph IO port
         for (&(sid, io_port), &mapped_gport) in &editor.io_port_mapping {
             if sid != subgraph_id || mapped_gport != gport { continue; }
 
-            // io_port is an output port on a Group Input IO node in the subgraph.
-            // Find the IO node that owns it.
-            if let Some(io_owner) = subgraph.world.get::<PortOwner>(io_port).map(|o| o.0) {
-                if let Some(c) = upstream_color {
-                    colors.insert(io_owner, c);
-                }
-                if let Some(ref t) = upstream_tex {
-                    textures.insert(io_owner, t.clone());
-                }
+            // io_port is the output port on a Group Input IO node.
+            // Inject the upstream value keyed by this IO output port.
+            if let Some(c) = upstream_color {
+                colors.insert(io_port, c);
+            }
+            if let Some(ref t) = upstream_tex {
+                textures.insert(io_port, t.clone());
             }
         }
     }
@@ -109,8 +100,6 @@ fn eval_group_node(
     let sub_order = subgraph.eval_order();
     for sub_node_id in sub_order {
         if subgraph.world.get::<GroupIOKind>(sub_node_id).is_some() {
-            // Group Input IO nodes: their values were injected above
-            // Group Output IO nodes: we read from their connected input below
             continue;
         }
         if let Some(sub_root) = subgraph.world.get::<SubgraphRoot>(sub_node_id) {
@@ -123,7 +112,7 @@ fn eval_group_node(
         eval_node(sub_node_id, &type_id, subgraph, params, textures, colors);
     }
 
-    // Map subgraph Group Output IO node inputs → group node output values.
+    // Map subgraph Group Output IO node inputs → group node output ports.
     for &gport in parent_graph.node_ports(group_node_id) {
         let dir = parent_graph.world.get::<PortDirection>(gport).copied().unwrap_or(PortDirection::Input);
         if dir != PortDirection::Output { continue; }
@@ -132,33 +121,34 @@ fn eval_group_node(
             if sid != subgraph_id || mapped_gport != gport { continue; }
 
             // io_port is an input port on a Group Output IO node.
-            // Find what's connected to it in the subgraph.
+            // Find what's connected to it and propagate to the group's output port.
             if let Some(t) = find_upstream(io_port, subgraph, textures) {
-                textures.insert(group_node_id, t);
+                textures.insert(gport, t);
             }
             if let Some(c) = find_upstream(io_port, subgraph, colors) {
-                colors.insert(group_node_id, c);
+                colors.insert(gport, c);
             }
         }
     }
 }
 
-/// Find the upstream source node for an input port and look up its value in the given map.
+/// Trace a connection from an input port back to its source output port,
+/// then look up the source port's value in the given map.
 fn find_upstream<T: Clone>(
     port_id: EntityId, graph: &NodeGraph, values: &HashMap<EntityId, T>,
 ) -> Option<T> {
     for &conn_id in graph.port_connections(port_id) {
         let ep = graph.world.get::<ConnectionEndpoints>(conn_id)?;
         if ep.target_port != port_id { continue; }
-        let src_node = graph.world.get::<PortOwner>(ep.source_port)?.0;
-        if let Some(v) = values.get(&src_node) {
+        // Look up by source PORT, not source node
+        if let Some(v) = values.get(&ep.source_port) {
             return Some(v.clone());
         }
     }
     None
 }
 
-/// Evaluate a single non-group node.
+/// Evaluate a single non-group node. Stores results keyed by output port ID.
 fn eval_node(
     node_id: EntityId,
     type_id: &str,
@@ -169,24 +159,17 @@ fn eval_node(
 ) {
     let get_input_texture = |label: &str| -> Option<Rc<TextureBuffer>> {
         for &pid in graph.node_ports(node_id) {
-            let dir = graph.world.get::<PortDirection>(pid).copied()?;
-            if dir != PortDirection::Input { continue; }
-            let pl = graph.world.get::<PortLabel>(pid).map(|l| l.0.as_str())?;
+            if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) { continue; }
+            let pl = graph.world.get::<PortLabel>(pid).map(|l| l.0.as_str()).unwrap_or("");
             if pl != label { continue; }
-            for &conn_id in graph.port_connections(pid) {
-                let ep = graph.world.get::<ConnectionEndpoints>(conn_id)?;
-                if ep.target_port != pid { continue; }
-                let src_node = graph.world.get::<PortOwner>(ep.source_port)?.0;
-                return textures.get(&src_node).cloned();
-            }
+            return find_upstream(pid, graph, textures);
         }
         None
     };
 
     let get_float = |label: &str| -> f64 {
         for &pid in graph.node_ports(node_id) {
-            let dir = graph.world.get::<PortDirection>(pid).copied().unwrap_or(PortDirection::Output);
-            if dir != PortDirection::Input { continue; }
+            if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) { continue; }
             let pl = graph.world.get::<PortLabel>(pid).map(|l| l.0.clone()).unwrap_or_default();
             if pl != label { continue; }
             return params.get_float(pid, crate::params::default_float(type_id, label)).get();
@@ -196,48 +179,60 @@ fn eval_node(
 
     let get_color = |label: &str| -> [u8; 4] {
         for &pid in graph.node_ports(node_id) {
-            let dir = graph.world.get::<PortDirection>(pid).copied().unwrap_or(PortDirection::Output);
-            if dir != PortDirection::Input { continue; }
+            if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) { continue; }
             let pl = graph.world.get::<PortLabel>(pid).map(|l| l.0.clone()).unwrap_or_default();
             if pl != label { continue; }
-            // Check connected upstream color
-            for &conn_id in graph.port_connections(pid) {
-                if let Some(ep) = graph.world.get::<ConnectionEndpoints>(conn_id) {
-                    if ep.target_port != pid { continue; }
-                    if let Some(src_node) = graph.world.get::<PortOwner>(ep.source_port).map(|o| o.0) {
-                        if let Some(&c) = colors.get(&src_node) {
-                            return c;
-                        }
-                    }
-                }
+            // Check connected upstream color (by source port)
+            if let Some(c) = find_upstream(pid, graph, colors) {
+                return c;
             }
             return params.get_color(pid, crate::params::default_color(type_id, label)).get();
         }
         [200, 200, 200, 255]
     };
 
+    // Compute the result and store keyed by each output port
+    let store_texture = |tex: TextureBuffer, textures: &mut HashMap<EntityId, Rc<TextureBuffer>>| {
+        let tex = Rc::new(tex);
+        for &pid in graph.node_ports(node_id) {
+            if graph.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Output) {
+                if graph.world.get::<PortSocketType>(pid).map(|s| s.0) == Some(SocketType::Image) {
+                    textures.insert(pid, tex.clone());
+                }
+            }
+        }
+    };
+
     match type_id {
         "solid_color" => {
-            let color = graph.node_ports(node_id).iter()
-                .find(|&&pid| graph.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Output))
-                .map(|&pid| params.get_color(pid, crate::params::default_color("solid_color", "Color")).get())
-                .unwrap_or([200, 200, 200, 255]);
-            colors.insert(node_id, color);
+            // Output port is Color type
+            for &pid in graph.node_ports(node_id) {
+                if graph.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Output) {
+                    let color = params.get_color(pid, crate::params::default_color("solid_color", "Color")).get();
+                    colors.insert(pid, color);
+                }
+            }
         }
-        "checker" => { textures.insert(node_id, Rc::new(eval_checker(get_color("Color A"), get_color("Color B"), get_float("Size")))); }
-        "noise" => { textures.insert(node_id, Rc::new(eval_noise(get_float("Scale"), get_float("Seed")))); }
-        "gradient" => { textures.insert(node_id, Rc::new(eval_gradient(get_color("Color A"), get_color("Color B")))); }
-        "brick" => { textures.insert(node_id, Rc::new(eval_brick(get_color("Mortar"), get_color("Brick"), get_float("Rows")))); }
-        "mix" => { textures.insert(node_id, Rc::new(eval_mix(get_input_texture("A"), get_input_texture("B"), get_float("Factor")))); }
-        "brightness_contrast" => { textures.insert(node_id, Rc::new(eval_brightness_contrast(get_input_texture("Texture"), get_float("Brightness"), get_float("Contrast")))); }
-        "threshold" => { textures.insert(node_id, Rc::new(eval_threshold(get_input_texture("Texture"), get_float("Level")))); }
-        "invert" => { textures.insert(node_id, Rc::new(eval_invert(get_input_texture("Texture")))); }
-        "colorize" => { textures.insert(node_id, Rc::new(eval_colorize(get_input_texture("Texture"), get_color("Tint")))); }
+        "checker" => store_texture(eval_checker(get_color("Color A"), get_color("Color B"), get_float("Size")), textures),
+        "noise" => store_texture(eval_noise(get_float("Scale"), get_float("Seed")), textures),
+        "gradient" => store_texture(eval_gradient(get_color("Color A"), get_color("Color B")), textures),
+        "brick" => store_texture(eval_brick(get_color("Mortar"), get_color("Brick"), get_float("Rows")), textures),
+        "mix" => store_texture(eval_mix(get_input_texture("A"), get_input_texture("B"), get_float("Factor")), textures),
+        "brightness_contrast" => store_texture(eval_brightness_contrast(get_input_texture("Texture"), get_float("Brightness"), get_float("Contrast")), textures),
+        "threshold" => store_texture(eval_threshold(get_input_texture("Texture"), get_float("Level")), textures),
+        "invert" => store_texture(eval_invert(get_input_texture("Texture")), textures),
+        "colorize" => store_texture(eval_colorize(get_input_texture("Texture"), get_color("Tint")), textures),
         "preview" | "tiled_preview" | "iso_preview" => {
-            if let Some(t) = get_input_texture("Texture") {
-                textures.insert(node_id, t);
-            } else {
-                textures.insert(node_id, Rc::new(TextureBuffer::new()));
+            // Sink nodes: store the input texture under a synthetic "output" keyed by the input port
+            // so preview can find it. We use the node's input port as the lookup key.
+            for &pid in graph.node_ports(node_id) {
+                if graph.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Input) {
+                    if let Some(t) = find_upstream(pid, graph, textures) {
+                        textures.insert(pid, t);
+                    } else {
+                        textures.insert(pid, Rc::new(TextureBuffer::new()));
+                    }
+                }
             }
         }
         _ => {}

@@ -8,6 +8,7 @@ use wasm_bindgen::Clamped;
 
 use nodegraph_core::EntityId;
 use nodegraph_core::graph::node::NodeTypeId;
+use nodegraph_core::graph::port::PortDirection;
 use nodegraph_render::GraphSignals;
 
 use crate::params::ParamStore;
@@ -99,7 +100,7 @@ pub fn make_custom_body(
                         wasm_bindgen_futures::spawn_local(async move {
                             eval_scheduled.set(false);
                             let result = crate::eval::evaluate(&gs_eval, &params);
-                            update_previews(&canvases, &result.textures);
+                            update_previews(&canvases, &result.textures, &gs_eval);
                         });
                     }
                 })
@@ -109,23 +110,50 @@ pub fn make_custom_body(
 }
 
 /// Update all registered canvases with texture data from evaluation.
+/// Textures are keyed by port EntityId, so we find the node's relevant port.
 pub fn update_previews(
     canvases: &CanvasRegistry,
     textures: &HashMap<EntityId, Rc<TextureBuffer>>,
+    gs: &Rc<GraphSignals>,
 ) {
     let canvases = canvases.borrow();
-    for (node_id, entry) in canvases.iter() {
-        let tex = match textures.get(node_id) {
+    for (&node_id, entry) in canvases.iter() {
+        let tex = find_node_texture(node_id, &entry.node_type, textures, gs);
+        let tex = match tex {
             Some(t) => t,
             None => continue,
         };
 
         match entry.node_type.as_str() {
-            "tiled_preview" => render_tiled(&entry.canvas, tex),
-            "iso_preview" => render_isometric(&entry.canvas, tex),
-            _ => render_direct(&entry.canvas, tex),
+            "tiled_preview" => render_tiled(&entry.canvas, &tex),
+            "iso_preview" => render_isometric(&entry.canvas, &tex),
+            _ => render_direct(&entry.canvas, &tex),
         }
     }
+}
+
+/// Find the texture for a node by looking up its ports in the eval result.
+fn find_node_texture(
+    node_id: EntityId,
+    node_type: &str,
+    textures: &HashMap<EntityId, Rc<TextureBuffer>>,
+    gs: &Rc<GraphSignals>,
+) -> Option<Rc<TextureBuffer>> {
+    // For sink nodes (preview/tiled/iso), the texture is stored under the input port.
+    // For all other nodes, it's stored under the output port.
+    let is_sink = matches!(node_type, "preview" | "tiled_preview" | "iso_preview");
+    let target_dir = if is_sink { PortDirection::Input } else { PortDirection::Output };
+
+    gs.with_graph(|g| {
+        for &pid in g.node_ports(node_id) {
+            if g.world.get::<PortDirection>(pid).copied() == Some(target_dir) {
+                if let Some(t) = textures.get(&pid) {
+                    return Some(t.clone());
+                }
+            }
+        }
+        None
+    })
 }
 
 /// Standard 1:1 putImageData.
