@@ -1,74 +1,67 @@
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use dominator::html;
+use futures_signals::signal::SignalExt;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::Clamped;
 
 use nodegraph_core::EntityId;
 use nodegraph_core::graph::node::NodeTypeId;
-use nodegraph_core::graph::port::PortDirection;
 use nodegraph_render::GraphSignals;
 
-use crate::params::ParamStore;
+use crate::reactive_eval::ReactiveEval;
 use crate::texture::{TextureBuffer, TEX_SIZE};
-
-/// Canvas entry with its node type for choosing the right render mode.
-pub struct CanvasEntry {
-    canvas: web_sys::HtmlCanvasElement,
-    node_type: String,
-}
-
-pub type CanvasRegistry = Rc<RefCell<HashMap<EntityId, CanvasEntry>>>;
-
-pub fn new_canvas_registry() -> CanvasRegistry {
-    Rc::new(RefCell::new(HashMap::new()))
-}
 
 /// Canvas dimensions for each node type.
 fn canvas_dims(type_id: &str) -> (u32, u32, &'static str) {
-    // (canvas_width, canvas_height, css_size)
     match type_id {
         "tiled_preview" => (TEX_SIZE as u32 * 4, TEX_SIZE as u32 * 4, "140"),
         "iso_preview" => (96, 96, "140"),
         "preview" => (TEX_SIZE as u32, TEX_SIZE as u32, "140"),
-        _ => (TEX_SIZE as u32, TEX_SIZE as u32, "80"), // inline previews
+        _ => (TEX_SIZE as u32, TEX_SIZE as u32, "80"),
     }
 }
 
 /// Build the custom_node_body callback that shows texture previews inside nodes.
+/// Each canvas reactively watches its node's texture signal.
+#[allow(clippy::type_complexity)]
 pub fn make_custom_body(
-    canvases: &CanvasRegistry,
-    gs: &Rc<GraphSignals>,
-    params: &Rc<ParamStore>,
+    reval: &Rc<ReactiveEval>,
 ) -> Rc<dyn Fn(EntityId, &Rc<GraphSignals>) -> Option<dominator::Dom>> {
-    let canvases = canvases.clone();
-    let gs_eval = gs.clone();
-    let params = params.clone();
-    // Coalesce multiple after_inserted callbacks into a single deferred evaluation
-    let eval_scheduled = Rc::new(Cell::new(false));
+    let reval = reval.clone();
     Rc::new(move |node_id, gs| {
         let type_id = gs.with_graph(|g| {
-            g.world.get::<NodeTypeId>(node_id).map(|t| t.0.clone()).unwrap_or_default()
+            g.world
+                .get::<NodeTypeId>(node_id)
+                .map(|t| t.0.clone())
+                .unwrap_or_default()
         });
 
-        let has_image_output = matches!(type_id.as_str(),
-            "checker" | "noise" | "gradient" | "brick" |
-            "mix" | "brightness_contrast" | "threshold" | "invert" | "colorize"
+        let has_image_output = matches!(
+            type_id.as_str(),
+            "checker"
+                | "noise"
+                | "gradient"
+                | "brick"
+                | "mix"
+                | "brightness_contrast"
+                | "threshold"
+                | "invert"
+                | "colorize"
         );
-        let is_output = matches!(type_id.as_str(), "preview" | "tiled_preview" | "iso_preview");
+        let is_output = matches!(
+            type_id.as_str(),
+            "preview" | "tiled_preview" | "iso_preview"
+        );
 
         if !has_image_output && !is_output {
             return None;
         }
 
         let (cw, ch, css_size) = canvas_dims(&type_id);
-        let canvases = canvases.clone();
-        let gs_eval = gs_eval.clone();
-        let params = params.clone();
-        let type_id_owned = type_id.clone();
-        let eval_scheduled = eval_scheduled.clone();
+        let reval = reval.clone();
+        let type_id_for_signal = type_id.clone();
+        let type_id_for_render = type_id.clone();
 
         Some(html!("div", {
             .style("display", "flex")
@@ -86,89 +79,89 @@ pub fn make_custom_body(
                 .style("background", "#000")
                 .after_inserted(move |el| {
                     let canvas: web_sys::HtmlCanvasElement = el.unchecked_into();
-                    canvases.borrow_mut().insert(node_id, CanvasEntry {
-                        canvas,
-                        node_type: type_id_owned,
+                    let sig = reval.texture_signal_for_node(node_id, &type_id_for_signal);
+                    let render_type = type_id_for_render;
+
+                    wasm_bindgen_futures::spawn_local(async move {
+                        sig.for_each(move |tex| {
+                            match render_type.as_str() {
+                                "tiled_preview" => render_tiled(&canvas, &tex),
+                                "iso_preview" => render_isometric(&canvas, &tex),
+                                _ => render_direct(&canvas, &tex),
+                            }
+                            async {}
+                        }).await;
                     });
-                    // Defer evaluation so multiple canvas insertions coalesce into one
-                    if !eval_scheduled.get() {
-                        eval_scheduled.set(true);
-                        let gs_eval = gs_eval.clone();
-                        let params = params.clone();
-                        let canvases = canvases.clone();
-                        let eval_scheduled = eval_scheduled.clone();
-                        wasm_bindgen_futures::spawn_local(async move {
-                            eval_scheduled.set(false);
-                            let result = crate::eval::evaluate(&gs_eval, &params);
-                            update_previews(&canvases, &result.textures, &gs_eval);
-                        });
-                    }
                 })
             }))
         }))
     })
 }
 
-/// Update all registered canvases with texture data from evaluation.
-/// Textures are keyed by port EntityId, so we find the node's relevant port.
-pub fn update_previews(
-    canvases: &CanvasRegistry,
-    textures: &HashMap<EntityId, Rc<TextureBuffer>>,
-    gs: &Rc<GraphSignals>,
-) {
-    let canvases = canvases.borrow();
-    for (&node_id, entry) in canvases.iter() {
-        let tex = find_node_texture(node_id, &entry.node_type, textures, gs);
-        let tex = match tex {
-            Some(t) => t,
-            None => continue,
-        };
-
-        match entry.node_type.as_str() {
-            "tiled_preview" => render_tiled(&entry.canvas, &tex),
-            "iso_preview" => render_isometric(&entry.canvas, &tex),
-            _ => render_direct(&entry.canvas, &tex),
-        }
-    }
-}
-
-/// Find the texture for a node by looking up its ports in the eval result.
-fn find_node_texture(
-    node_id: EntityId,
-    node_type: &str,
-    textures: &HashMap<EntityId, Rc<TextureBuffer>>,
-    gs: &Rc<GraphSignals>,
-) -> Option<Rc<TextureBuffer>> {
-    // For sink nodes (preview/tiled/iso), the texture is stored under the input port.
-    // For all other nodes, it's stored under the output port.
-    let is_sink = matches!(node_type, "preview" | "tiled_preview" | "iso_preview");
-    let target_dir = if is_sink { PortDirection::Input } else { PortDirection::Output };
-
-    gs.with_graph(|g| {
-        for &pid in g.node_ports(node_id) {
-            if g.world.get::<PortDirection>(pid).copied() == Some(target_dir) {
-                if let Some(t) = textures.get(&pid) {
-                    return Some(t.clone());
-                }
-            }
-        }
-        None
-    })
-}
+// ============================================================
+// Rendering functions
+// ============================================================
 
 /// Standard 1:1 putImageData.
 fn render_direct(canvas: &web_sys::HtmlCanvasElement, tex: &TextureBuffer) {
-    let ctx = match get_2d_ctx(canvas) { Some(c) => c, None => return };
+    let ctx = match get_2d_ctx(canvas) {
+        Some(c) => c,
+        None => return,
+    };
     let pixels = tex.as_u8_slice();
     let image_data = match web_sys::ImageData::new_with_u8_clamped_array_and_sh(
-        Clamped(&pixels), TEX_SIZE as u32, TEX_SIZE as u32,
-    ) { Ok(d) => d, Err(_) => return };
+        Clamped(&pixels),
+        TEX_SIZE as u32,
+        TEX_SIZE as u32,
+    ) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
     let _ = ctx.put_image_data(&image_data, 0.0, 0.0);
 }
 
 /// 4x4 tiled repeat of the texture.
 fn render_tiled(canvas: &web_sys::HtmlCanvasElement, tex: &TextureBuffer) {
-    let ctx = match get_2d_ctx(canvas) { Some(c) => c, None => return };
+    let ctx = match get_2d_ctx(canvas) {
+        Some(c) => c,
+        None => return,
+    };
+    let pixels = tiled_pixels(tex);
+    let size = TEX_SIZE * 4;
+    let image_data = match web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+        Clamped(&pixels),
+        size as u32,
+        size as u32,
+    ) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let _ = ctx.put_image_data(&image_data, 0.0, 0.0);
+}
+
+/// Isometric cube with top, left, and right faces.
+fn render_isometric(canvas: &web_sys::HtmlCanvasElement, tex: &TextureBuffer) {
+    let ctx = match get_2d_ctx(canvas) {
+        Some(c) => c,
+        None => return,
+    };
+    let pixels = isometric_pixels(tex);
+    let image_data = match web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+        Clamped(&pixels),
+        96,
+        96,
+    ) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let _ = ctx.put_image_data(&image_data, 0.0, 0.0);
+}
+
+// ============================================================
+// Pure pixel-computation helpers (testable without web_sys)
+// ============================================================
+
+pub(crate) fn tiled_pixels(tex: &TextureBuffer) -> Vec<u8> {
     let tiles = 4usize;
     let size = TEX_SIZE * tiles;
     let mut pixels = vec![0u8; size * size * 4];
@@ -179,28 +172,10 @@ fn render_tiled(canvas: &web_sys::HtmlCanvasElement, tex: &TextureBuffer) {
             pixels[dst..dst + 4].copy_from_slice(&src);
         }
     }
-    let image_data = match web_sys::ImageData::new_with_u8_clamped_array_and_sh(
-        Clamped(&pixels), size as u32, size as u32,
-    ) { Ok(d) => d, Err(_) => return };
-    let _ = ctx.put_image_data(&image_data, 0.0, 0.0);
+    pixels
 }
 
-/// Isometric cube with top, left, and right faces.
-///
-/// Geometry (96x96 canvas):
-///   Top vertex A = (48, 0)
-///   Right vertex B = (96, 24)
-///   Front vertex G = (48, 48)
-///   Left vertex F = (0, 24)
-///   Bottom-left E = (0, 72)
-///   Bottom-right C = (96, 72)
-///   Bottom vertex D = (48, 96)
-///
-/// Top face: A-B-G-F    (full brightness)
-/// Left face: F-G-D-E   (0.7 brightness)
-/// Right face: G-B-C-D  (0.5 brightness)
-fn render_isometric(canvas: &web_sys::HtmlCanvasElement, tex: &TextureBuffer) {
-    let ctx = match get_2d_ctx(canvas) { Some(c) => c, None => return };
+pub(crate) fn isometric_pixels(tex: &TextureBuffer) -> Vec<u8> {
     let w = 96usize;
     let h = 96usize;
     let mut pixels = vec![0u8; w * h * 4];
@@ -209,56 +184,45 @@ fn render_isometric(canvas: &web_sys::HtmlCanvasElement, tex: &TextureBuffer) {
         for px in 0..w {
             let (fpx, fpy) = (px as f64, py as f64);
 
-            // Try top face: A(48,0) B(96,24) G(48,48) F(0,24)
-            // P = A + u*(B-A) + v*(F-A) = (48+48u-48v, 24u+24v)
-            // u = (px - 48 + 2*py) / 96, v = py/24 - u
+            // Top face: A(48,0) B(96,24) G(48,48) F(0,24)
             let u = (fpx - 48.0 + 2.0 * fpy) / 96.0;
             let v = fpy / 24.0 - u;
-            if u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0 {
+            if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) {
                 let c = sample_tex(tex, u, v);
                 set_pixel(&mut pixels, w, px, py, c);
                 continue;
             }
 
-            // Try left face: F(0,24) G(48,48) D(48,96) E(0,72)
-            // P = F + u*(G-F) + v*(E-F) = (48u, 24+24u+48v)
-            // u = px/48, v = (py-24-24u)/48
+            // Left face: F(0,24) G(48,48) D(48,96) E(0,72)
             let u = fpx / 48.0;
             let v = (fpy - 24.0 - 24.0 * u) / 48.0;
-            if u >= 0.0 && u < 1.0 && v >= 0.0 && v <= 1.0 {
+            if (0.0..1.0).contains(&u) && (0.0..=1.0).contains(&v) {
                 let c = sample_tex_shaded(tex, u, v, 0.7);
                 set_pixel(&mut pixels, w, px, py, c);
                 continue;
             }
 
-            // Try right face: G(48,48) B(96,24) C(96,72) D(48,96)
-            // P = G + u*(B-G) + v*(D-G) = (48+48u, 48-24u+48v)
-            // u = (px-48)/48, v = (py-48+24u)/48
+            // Right face: G(48,48) B(96,24) C(96,72) D(48,96)
             let u = (fpx - 48.0) / 48.0;
             let v = (fpy - 48.0 + 24.0 * u) / 48.0;
-            if u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0 {
+            if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) {
                 let c = sample_tex_shaded(tex, u, v, 0.5);
                 set_pixel(&mut pixels, w, px, py, c);
                 continue;
             }
-
-            // Background: transparent (already 0)
         }
     }
 
-    let image_data = match web_sys::ImageData::new_with_u8_clamped_array_and_sh(
-        Clamped(&pixels), w as u32, h as u32,
-    ) { Ok(d) => d, Err(_) => return };
-    let _ = ctx.put_image_data(&image_data, 0.0, 0.0);
+    pixels
 }
 
-fn sample_tex(tex: &TextureBuffer, u: f64, v: f64) -> [u8; 4] {
+pub(crate) fn sample_tex(tex: &TextureBuffer, u: f64, v: f64) -> [u8; 4] {
     let tx = ((u * TEX_SIZE as f64) as usize).min(TEX_SIZE - 1);
     let ty = ((v * TEX_SIZE as f64) as usize).min(TEX_SIZE - 1);
     tex.data[ty * TEX_SIZE + tx]
 }
 
-fn sample_tex_shaded(tex: &TextureBuffer, u: f64, v: f64, shade: f64) -> [u8; 4] {
+pub(crate) fn sample_tex_shaded(tex: &TextureBuffer, u: f64, v: f64, shade: f64) -> [u8; 4] {
     let [r, g, b, a] = sample_tex(tex, u, v);
     [
         (r as f64 * shade) as u8,
@@ -268,12 +232,98 @@ fn sample_tex_shaded(tex: &TextureBuffer, u: f64, v: f64, shade: f64) -> [u8; 4]
     ]
 }
 
-fn set_pixel(buf: &mut [u8], stride: usize, x: usize, y: usize, c: [u8; 4]) {
+pub(crate) fn set_pixel(buf: &mut [u8], stride: usize, x: usize, y: usize, c: [u8; 4]) {
     let i = (y * stride + x) * 4;
     buf[i..i + 4].copy_from_slice(&c);
 }
 
 fn get_2d_ctx(canvas: &web_sys::HtmlCanvasElement) -> Option<web_sys::CanvasRenderingContext2d> {
-    canvas.get_context("2d").ok()?
+    canvas
+        .get_context("2d")
+        .ok()?
         .map(|ctx| ctx.unchecked_into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::texture::{TextureBuffer, TEX_SIZE};
+    use wasm_bindgen_test::*;
+
+
+    /// Helper: create a texture where pixel (x, y) has a unique color.
+    fn make_gradient_tex() -> TextureBuffer {
+        let mut tex = TextureBuffer::new();
+        for y in 0..TEX_SIZE {
+            for x in 0..TEX_SIZE {
+                tex.set(x, y, [x as u8 * 16, y as u8 * 16, 128, 255]);
+            }
+        }
+        tex
+    }
+
+    #[wasm_bindgen_test]
+    fn sample_tex_corners() {
+        let tex = make_gradient_tex();
+        // (0.0, 0.0) maps to pixel (0, 0)
+        assert_eq!(sample_tex(&tex, 0.0, 0.0), tex.data[0]);
+        // (0.99, 0.99) maps to pixel (15, 15)
+        assert_eq!(sample_tex(&tex, 0.99, 0.99), tex.data[15 * TEX_SIZE + 15]);
+    }
+
+    #[wasm_bindgen_test]
+    fn sample_tex_shaded_halves() {
+        let mut tex = TextureBuffer::new();
+        tex.set(0, 0, [200, 100, 50, 255]);
+
+        let c = sample_tex_shaded(&tex, 0.0, 0.0, 0.5);
+        assert_eq!(c[0], 100); // 200 * 0.5
+        assert_eq!(c[1], 50);  // 100 * 0.5
+        assert_eq!(c[2], 25);  // 50 * 0.5
+        assert_eq!(c[3], 255); // alpha preserved
+    }
+
+    #[wasm_bindgen_test]
+    fn set_pixel_correct_offset() {
+        let stride = 10;
+        let mut buf = vec![0u8; stride * stride * 4];
+        set_pixel(&mut buf, stride, 3, 2, [11, 22, 33, 44]);
+
+        let i = (2 * stride + 3) * 4;
+        assert_eq!(&buf[i..i + 4], &[11, 22, 33, 44]);
+    }
+
+    #[wasm_bindgen_test]
+    fn tiled_pixels_wraps() {
+        let tex = make_gradient_tex();
+        let pixels = tiled_pixels(&tex);
+        let size = TEX_SIZE * 4;
+
+        // Pixel at (TEX_SIZE, 0) should equal pixel at (0, 0) due to wrapping
+        let idx_wrap = TEX_SIZE * 4;
+        let idx_orig = 0;
+        assert_eq!(
+            &pixels[idx_wrap..idx_wrap + 4],
+            &pixels[idx_orig..idx_orig + 4],
+        );
+
+        // Pixel at (0, TEX_SIZE) should equal pixel at (0, 0)
+        let idx_wrap_y = (TEX_SIZE * size) * 4;
+        assert_eq!(
+            &pixels[idx_wrap_y..idx_wrap_y + 4],
+            &pixels[idx_orig..idx_orig + 4],
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn isometric_center_covered() {
+        let tex = make_gradient_tex();
+        let pixels = isometric_pixels(&tex);
+        let w = 96;
+
+        // Pixel at (48, 24) is the center of the top face — should be non-transparent
+        let i = (24 * w + 48) * 4;
+        let alpha = pixels[i + 3];
+        assert_ne!(alpha, 0, "center pixel (48,24) should be non-transparent");
+    }
 }

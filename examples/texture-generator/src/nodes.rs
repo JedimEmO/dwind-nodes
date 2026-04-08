@@ -168,3 +168,59 @@ pub fn register_all(reg: &mut NodeTypeRegistry) {
         output_ports: vec![],
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+
+    fn make_registry() -> NodeTypeRegistry {
+        let mut reg = NodeTypeRegistry::new();
+        register_all(&mut reg);
+        reg
+    }
+
+    #[wasm_bindgen_test]
+    fn register_all_thirteen_types() {
+        let reg = make_registry();
+        // 5 generators + 5 filters + 3 outputs = 13
+        assert_eq!(reg.all().len(), 13);
+    }
+
+    #[wasm_bindgen_test]
+    fn checker_ports_correct() {
+        let reg = make_registry();
+        let checker = reg.get("checker").expect("checker type not found");
+
+        assert_eq!(checker.input_ports.len(), 3);
+
+        assert_eq!(checker.input_ports[0].label, "Color A");
+        assert_eq!(checker.input_ports[0].socket_type, SocketType::Color);
+
+        assert_eq!(checker.input_ports[1].label, "Color B");
+        assert_eq!(checker.input_ports[1].socket_type, SocketType::Color);
+
+        assert_eq!(checker.input_ports[2].label, "Size");
+        assert_eq!(checker.input_ports[2].socket_type, SocketType::Float);
+
+        assert_eq!(checker.output_ports.len(), 1);
+        assert_eq!(checker.output_ports[0].label, "Texture");
+        assert_eq!(checker.output_ports[0].socket_type, SocketType::Image);
+    }
+
+    #[wasm_bindgen_test]
+    fn output_nodes_no_outputs() {
+        let reg = make_registry();
+
+        for type_id in &["preview", "tiled_preview", "iso_preview"] {
+            let def = reg.get(type_id).unwrap_or_else(|| panic!("{} type not found", type_id));
+            assert!(
+                def.output_ports.is_empty(),
+                "{} should have no output ports but has {}",
+                type_id,
+                def.output_ports.len()
+            );
+        }
+    }
+}

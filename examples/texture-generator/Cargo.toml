@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 nodegraph-core = { path = "../../crates/nodegraph-core" }
@@ -23,3 +23,6 @@ web-sys = { version = "0.3", features = [
     "ImageData",
 ] }
 js-sys = "0.3"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

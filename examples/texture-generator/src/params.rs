@@ -13,8 +13,6 @@ use nodegraph_widgets::float_input::{float_input, FloatInputProps};
 pub struct ParamStore {
     floats: RefCell<HashMap<EntityId, Mutable<f64>>>,
     colors: RefCell<HashMap<EntityId, Mutable<[u8; 4]>>>,
-    /// Callback fired whenever any param value changes. Set once after construction.
-    on_change: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 impl ParamStore {
@@ -22,45 +20,31 @@ impl ParamStore {
         Rc::new(Self {
             floats: RefCell::new(HashMap::new()),
             colors: RefCell::new(HashMap::new()),
-            on_change: RefCell::new(None),
         })
     }
 
-    /// Set the callback that fires on any param change.
-    pub fn set_on_change(&self, cb: Rc<dyn Fn()>) {
-        *self.on_change.borrow_mut() = Some(cb);
-    }
-
     pub fn get_float(&self, port_id: EntityId, default: f64) -> Mutable<f64> {
-        Self::get_or_create(&self.floats, port_id, default, &self.on_change)
+        self.floats.borrow_mut()
+            .entry(port_id)
+            .or_insert_with(|| Mutable::new(default))
+            .clone()
     }
 
     pub fn get_color(&self, port_id: EntityId, default: [u8; 4]) -> Mutable<[u8; 4]> {
-        Self::get_or_create(&self.colors, port_id, default, &self.on_change)
+        self.colors.borrow_mut()
+            .entry(port_id)
+            .or_insert_with(|| Mutable::new(default))
+            .clone()
     }
 
-    fn get_or_create<T: Copy + 'static>(
-        map: &RefCell<HashMap<EntityId, Mutable<T>>>,
-        port_id: EntityId,
-        default: T,
-        on_change: &RefCell<Option<Rc<dyn Fn()>>>,
-    ) -> Mutable<T> {
-        let mut map = map.borrow_mut();
-        if let Some(m) = map.get(&port_id) {
-            return m.clone();
+    /// Snapshot all current param values into plain HashMaps (for group node evaluation).
+    pub fn snapshot(&self) -> crate::eval::ParamSnapshot {
+        let floats = self.floats.borrow();
+        let colors = self.colors.borrow();
+        crate::eval::ParamSnapshot {
+            floats: floats.iter().map(|(&k, v)| (k, v.get())).collect(),
+            colors: colors.iter().map(|(&k, v)| (k, v.get())).collect(),
         }
-        let m = Mutable::new(default);
-        map.insert(port_id, m.clone());
-        if let Some(cb) = on_change.borrow().clone() {
-            let sig = m.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                sig.signal().for_each(move |_| {
-                    cb();
-                    async {}
-                }).await;
-            });
-        }
-        m
     }
 }
 
@@ -111,6 +95,7 @@ fn rgba_to_hex(c: [u8; 4]) -> String {
 }
 
 /// Build the port_widget callback for the texture generator.
+#[allow(clippy::type_complexity)]
 pub fn make_port_widget(params: &Rc<ParamStore>) -> Rc<dyn Fn(EntityId, EntityId, SocketType, PortDirection, &str, bool, &Rc<GraphSignals>) -> Option<dominator::Dom>> {
     let params = params.clone();
     Rc::new(move |_node_id, port_id, socket_type, port_dir, type_id, is_connected, _gs| {
@@ -198,4 +183,76 @@ fn color_picker(value: Mutable<[u8; 4]>) -> dominator::Dom {
             }))
         }))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+
+    #[wasm_bindgen_test]
+    fn default_float_known() {
+        assert_eq!(default_float("checker", "Size"), 4.0);
+        assert_eq!(default_float("noise", "Scale"), 5.0);
+        assert_eq!(default_float("noise", "Seed"), 1.0);
+        assert_eq!(default_float("threshold", "Level"), 0.5);
+    }
+
+    #[wasm_bindgen_test]
+    fn default_float_unknown_zero() {
+        assert_eq!(default_float("nonexistent", "Whatever"), 0.0);
+    }
+
+    #[wasm_bindgen_test]
+    fn default_color_known() {
+        assert_eq!(default_color("solid_color", "Color"), [139, 105, 20, 255]);
+    }
+
+    #[wasm_bindgen_test]
+    fn default_color_unknown_gray() {
+        assert_eq!(default_color("nonexistent", "Whatever"), [200, 200, 200, 255]);
+    }
+
+    #[wasm_bindgen_test]
+    fn get_float_default() {
+        use nodegraph_core::store::World;
+        let mut world = World::new();
+        let id = world.spawn();
+
+        let store = ParamStore::new();
+        let m = store.get_float(id, 3.5);
+        assert_eq!(m.get(), 3.5);
+    }
+
+    #[wasm_bindgen_test]
+    fn get_float_same_mutable() {
+        use nodegraph_core::store::World;
+        let mut world = World::new();
+        let id = world.spawn();
+
+        let store = ParamStore::new();
+        let m1 = store.get_float(id, 1.0);
+        let m2 = store.get_float(id, 999.0); // default ignored on second call
+        m1.set(42.0);
+        assert_eq!(m2.get(), 42.0);
+    }
+
+    #[wasm_bindgen_test]
+    fn get_color_default() {
+        use nodegraph_core::store::World;
+        let mut world = World::new();
+        let id = world.spawn();
+
+        let store = ParamStore::new();
+        let m = store.get_color(id, [10, 20, 30, 255]);
+        assert_eq!(m.get(), [10, 20, 30, 255]);
+    }
+
+    #[wasm_bindgen_test]
+    fn hex_rgba_roundtrip() {
+        assert_eq!(hex_to_rgba("#8b6914"), [139, 105, 20, 255]);
+        let hex = rgba_to_hex([139, 105, 20, 255]);
+        assert_eq!(hex_to_rgba(&hex), [139, 105, 20, 255]);
+    }
 }
