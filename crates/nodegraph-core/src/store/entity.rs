@@ -30,6 +30,8 @@ pub struct EntityAllocator {
     generations: Vec<Generation>,
     free_list: Vec<u32>,
     alive: Vec<bool>,
+    /// Upper bound on entity index (exclusive). None = unbounded (root graph).
+    max_index: Option<u32>,
 }
 
 impl EntityAllocator {
@@ -38,17 +40,20 @@ impl EntityAllocator {
             generations: Vec::new(),
             free_list: Vec::new(),
             alive: Vec::new(),
+            max_index: None,
         }
     }
 
     /// Create an allocator that starts allocating entity indices from `start`.
     /// Indices 0..start are reserved (dead) so they never collide with other allocators.
-    pub fn new_with_start(start: u32) -> Self {
+    /// `block_size` sets the maximum number of entities this allocator can create.
+    pub fn new_with_start(start: u32, block_size: u32) -> Self {
         let n = start as usize;
         Self {
             generations: vec![Generation::new(); n],
             free_list: Vec::new(),
             alive: vec![false; n],
+            max_index: Some(start + block_size),
         }
     }
 
@@ -61,6 +66,12 @@ impl EntityAllocator {
             }
         } else {
             let index = self.generations.len() as u32;
+            if let Some(max) = self.max_index {
+                assert!(
+                    index < max,
+                    "entity allocator exceeded block range: index {index} >= max {max}"
+                );
+            }
             self.generations.push(Generation::new());
             self.alive.push(true);
             EntityId {

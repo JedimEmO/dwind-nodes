@@ -929,7 +929,7 @@ impl ReactiveEval {
                             }
                         }
                         for (&pid, m) in &color_outputs {
-                            if let Some(&color) = snap.colors.get(&pid) {
+                            if let Some(&color) = result.colors.get(&pid) {
                                 m.set(color);
                             }
                         }

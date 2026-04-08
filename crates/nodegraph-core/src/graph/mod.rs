@@ -49,9 +49,9 @@ impl NodeGraph {
         }
     }
 
-    pub fn new_with_start(start_index: u32) -> Self {
+    pub fn new_with_start(start_index: u32, block_size: u32) -> Self {
         Self {
-            world: World::new_with_start(start_index),
+            world: World::new_with_start(start_index, block_size),
             ports_by_node: HashMap::new(),
             connections_by_port: HashMap::new(),
         }
@@ -499,7 +499,8 @@ impl GraphEditor {
         let subgraph_id = self.alloc_graph_id();
         let start = self.next_entity_start;
         self.next_entity_start += 10_000;
-        let mut subgraph = NodeGraph::new_with_start(start);
+        let block_size = 10_000;
+        let mut subgraph = NodeGraph::new_with_start(start, block_size);
 
         let current_id = self.current_graph_id;
         let parent = self.graphs.get_mut(&current_id)?;

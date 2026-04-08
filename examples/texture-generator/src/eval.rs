@@ -21,20 +21,23 @@ pub struct ParamSnapshot {
 pub struct EvalResult {
     /// Textures keyed by **output port** EntityId.
     pub textures: HashMap<EntityId, Rc<TextureBuffer>>,
+    /// Colors keyed by **output port** EntityId.
+    pub colors: HashMap<EntityId, [u8; 4]>,
 }
 
-/// Evaluate the entire graph (including subgraphs) and return textures keyed by output port.
+/// Evaluate the entire graph (including subgraphs) and return textures + colors keyed by output port.
 /// Used by group node computation in ReactiveEval.
 pub fn evaluate(editor: &GraphEditor, snap: &ParamSnapshot) -> EvalResult {
     let mut textures: HashMap<EntityId, Rc<TextureBuffer>> = HashMap::new();
     let mut colors: HashMap<EntityId, [u8; 4]> = HashMap::new();
+    let mut floats: HashMap<EntityId, f64> = HashMap::new();
 
     let root_id = editor.root_graph_id();
     let graph = editor.graph(root_id).expect("root graph");
 
-    eval_graph(graph, editor, snap, &mut textures, &mut colors);
+    eval_graph(graph, editor, snap, &mut textures, &mut colors, &mut floats);
 
-    EvalResult { textures }
+    EvalResult { textures, colors }
 }
 
 fn eval_graph(
@@ -43,12 +46,13 @@ fn eval_graph(
     snap: &ParamSnapshot,
     textures: &mut HashMap<EntityId, Rc<TextureBuffer>>,
     colors: &mut HashMap<EntityId, [u8; 4]>,
+    floats: &mut HashMap<EntityId, f64>,
 ) {
     let eval_order = graph.eval_order();
 
     for node_id in eval_order {
         if let Some(sub_root) = graph.world.get::<SubgraphRoot>(node_id) {
-            eval_group_node(node_id, sub_root.0, graph, editor, snap, textures, colors);
+            eval_group_node(node_id, sub_root.0, graph, editor, snap, textures, colors, floats);
             continue;
         }
 
@@ -60,10 +64,11 @@ fn eval_graph(
             .map(|t| t.0.clone())
             .unwrap_or_default();
 
-        eval_node(node_id, &type_id, graph, snap, textures, colors);
+        eval_node(node_id, &type_id, graph, snap, textures, colors, floats);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn eval_group_node(
     group_node_id: EntityId,
     subgraph_id: EntityId,
@@ -72,6 +77,7 @@ fn eval_group_node(
     snap: &ParamSnapshot,
     textures: &mut HashMap<EntityId, Rc<TextureBuffer>>,
     colors: &mut HashMap<EntityId, [u8; 4]>,
+    floats: &mut HashMap<EntityId, f64>,
 ) {
     let subgraph = match editor.graph(subgraph_id) {
         Some(g) => g,
@@ -79,14 +85,16 @@ fn eval_group_node(
     };
 
     // Map group node input port values → subgraph Group Input IO node output ports.
+    // Forward all value types: textures, colors, AND floats.
     for &gport in parent_graph.node_ports(group_node_id) {
         let dir = parent_graph.world.get::<PortDirection>(gport).copied().unwrap_or(PortDirection::Output);
         if dir != PortDirection::Input { continue; }
 
         let upstream_color = find_upstream(gport, parent_graph, colors);
         let upstream_tex = find_upstream(gport, parent_graph, textures);
+        let upstream_float = find_upstream(gport, parent_graph, floats)
+            .or_else(|| snap.floats.get(&gport).copied());
 
-        // Reverse-lookup: group_port → subgraph IO port
         for (&(sid, io_port), &mapped_gport) in &editor.io_port_mapping {
             if sid != subgraph_id || mapped_gport != gport { continue; }
 
@@ -95,6 +103,9 @@ fn eval_group_node(
             }
             if let Some(ref t) = upstream_tex {
                 textures.insert(io_port, t.clone());
+            }
+            if let Some(f) = upstream_float {
+                floats.insert(io_port, f);
             }
         }
     }
@@ -106,13 +117,13 @@ fn eval_group_node(
             continue;
         }
         if let Some(sub_root) = subgraph.world.get::<SubgraphRoot>(sub_node_id) {
-            eval_group_node(sub_node_id, sub_root.0, subgraph, editor, snap, textures, colors);
+            eval_group_node(sub_node_id, sub_root.0, subgraph, editor, snap, textures, colors, floats);
             continue;
         }
         let type_id = subgraph.world.get::<NodeTypeId>(sub_node_id)
             .map(|t| t.0.clone())
             .unwrap_or_default();
-        eval_node(sub_node_id, &type_id, subgraph, snap, textures, colors);
+        eval_node(sub_node_id, &type_id, subgraph, snap, textures, colors, floats);
     }
 
     // Map subgraph Group Output IO node inputs → group node output ports.
@@ -128,6 +139,9 @@ fn eval_group_node(
             }
             if let Some(c) = find_upstream(io_port, subgraph, colors) {
                 colors.insert(gport, c);
+            }
+            if let Some(f) = find_upstream(io_port, subgraph, floats) {
+                floats.insert(gport, f);
             }
         }
     }
@@ -157,6 +171,7 @@ fn eval_node(
     snap: &ParamSnapshot,
     textures: &mut HashMap<EntityId, Rc<TextureBuffer>>,
     colors: &mut HashMap<EntityId, [u8; 4]>,
+    floats: &mut HashMap<EntityId, f64>,
 ) {
     let get_input_texture = |label: &str| -> Option<Rc<TextureBuffer>> {
         for &pid in graph.node_ports(node_id) {
@@ -173,6 +188,10 @@ fn eval_node(
             if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) { continue; }
             let pl = graph.world.get::<PortLabel>(pid).map(|l| l.0.as_str()).unwrap_or("");
             if pl != label { continue; }
+            // Check connected upstream float first (for group IO forwarding)
+            if let Some(f) = find_upstream(pid, graph, floats) {
+                return f;
+            }
             let default = crate::params::default_float(type_id, label);
             return snap.floats.get(&pid).copied().unwrap_or(default);
         }
@@ -184,7 +203,6 @@ fn eval_node(
             if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) { continue; }
             let pl = graph.world.get::<PortLabel>(pid).map(|l| l.0.as_str()).unwrap_or("");
             if pl != label { continue; }
-            // Check connected upstream color (by source port)
             if let Some(c) = find_upstream(pid, graph, colors) {
                 return c;
             }

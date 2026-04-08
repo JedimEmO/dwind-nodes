@@ -39,11 +39,11 @@ impl World {
         }
     }
 
-    /// Create a World whose entity IDs start from `start_index`.
-    /// Prevents ID collisions when multiple Worlds coexist.
-    pub fn new_with_start(start_index: u32) -> Self {
+    /// Create a World whose entity IDs start from `start_index` with a maximum
+    /// of `block_size` entities. Prevents ID collisions when multiple Worlds coexist.
+    pub fn new_with_start(start_index: u32, block_size: u32) -> Self {
         Self {
-            allocator: entity::EntityAllocator::new_with_start(start_index),
+            allocator: entity::EntityAllocator::new_with_start(start_index, block_size),
             components: HashMap::new(),
             change_tracker: ChangeTracker::new(),
         }
