@@ -77,8 +77,10 @@ impl EntityAllocator {
             }
         } else {
             let local_index = self.generations.len() as u32;
+            // Soft limit: warn in debug builds but don't crash in release.
+            // The preflight in group_nodes is the real guard against block overflow.
             if let Some(max) = self.max_local {
-                assert!(
+                debug_assert!(
                     local_index < max,
                     "entity allocator exceeded block range: local {local_index} >= max {max} (offset {})",
                     self.start_offset

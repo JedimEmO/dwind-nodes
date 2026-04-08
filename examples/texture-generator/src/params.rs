@@ -37,6 +37,24 @@ impl ParamStore {
             .clone()
     }
 
+    /// Migrate param values from old port IDs to new port IDs.
+    /// Used after group/ungroup which recreates ports with fresh EntityIds.
+    pub fn migrate_ports(&self, old_to_new: &HashMap<EntityId, EntityId>) {
+        let mut floats = self.floats.borrow_mut();
+        for (old_id, new_id) in old_to_new {
+            if let Some(m) = floats.get(old_id).cloned() {
+                floats.insert(*new_id, m);
+            }
+        }
+        drop(floats);
+        let mut colors = self.colors.borrow_mut();
+        for (old_id, new_id) in old_to_new {
+            if let Some(m) = colors.get(old_id).cloned() {
+                colors.insert(*new_id, m);
+            }
+        }
+    }
+
     /// Snapshot all current param values into plain HashMaps (for group node evaluation).
     pub fn snapshot(&self) -> crate::eval::ParamSnapshot {
         let floats = self.floats.borrow();

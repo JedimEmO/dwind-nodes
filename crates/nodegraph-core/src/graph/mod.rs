@@ -495,8 +495,9 @@ impl GraphEditor {
     }
 
     /// Group selected nodes from the current graph into a new subgraph.
-    /// Returns (group_node_id, subgraph_id) on success.
-    pub fn group_nodes(&mut self, node_ids: &[EntityId]) -> Option<(EntityId, EntityId)> {
+    /// Returns (group_node_id, subgraph_id, old_to_new_port_map) on success.
+    /// The port map allows callers to migrate external state keyed by port EntityId.
+    pub fn group_nodes(&mut self, node_ids: &[EntityId]) -> Option<(EntityId, EntityId, HashMap<EntityId, EntityId>)> {
         if node_ids.is_empty() { return None; }
 
         // Preflight: estimate required entities for the subgraph and bail if it won't fit.
@@ -711,7 +712,7 @@ impl GraphEditor {
             self.io_port_mapping.insert((subgraph_id, sub_port), group_output_ports[i]);
         }
 
-        Some((group_node, subgraph_id))
+        Some((group_node, subgraph_id, old_to_new_port))
     }
 
     /// Ungroup: dissolve a group node, moving subgraph nodes back into the parent.
@@ -1083,7 +1084,7 @@ mod graph_editor_tests {
         // Group just n2 (the middle node)
         let result = ge.group_nodes(&[n2]);
         assert!(result.is_some());
-        let (group_node, subgraph_id) = result.unwrap();
+        let (group_node, subgraph_id, _) = result.unwrap();
 
         // Parent should have: n1, n3, group_node (3 nodes)
         let parent = ge.current_graph();
@@ -1124,7 +1125,7 @@ mod graph_editor_tests {
         let mut ge = GraphEditor::new();
         let (_n1, n2, _n3) = build_chain(&mut ge);
 
-        let (group_node, subgraph_id) = ge.group_nodes(&[n2]).unwrap();
+        let (group_node, subgraph_id, _) = ge.group_nodes(&[n2]).unwrap();
 
         // Enter group
         assert!(ge.enter_group(group_node));
@@ -1143,7 +1144,7 @@ mod graph_editor_tests {
         let (_n1, n2, _n3) = build_chain(&mut ge);
         let root = ge.root_graph_id();
 
-        let (group_node, _) = ge.group_nodes(&[n2]).unwrap();
+        let (group_node, _, _) = ge.group_nodes(&[n2]).unwrap();
         ge.enter_group(group_node);
 
         assert!(ge.navigate_to(root));
@@ -1156,7 +1157,7 @@ mod graph_editor_tests {
         let mut ge = GraphEditor::new();
         let (_n1, n2, _n3) = build_chain(&mut ge);
 
-        let (group_node, _) = ge.group_nodes(&[n2]).unwrap();
+        let (group_node, _, _) = ge.group_nodes(&[n2]).unwrap();
         assert_eq!(ge.current_graph().node_count(), 3);
 
         assert!(ge.ungroup(group_node));
@@ -1173,7 +1174,7 @@ mod graph_editor_tests {
         assert_eq!(ge.graph_label(root), "Root");
 
         let (_n1, n2, _n3) = build_chain(&mut ge);
-        let (_, subgraph_id) = ge.group_nodes(&[n2]).unwrap();
+        let (_, subgraph_id, _) = ge.group_nodes(&[n2]).unwrap();
         assert_eq!(ge.graph_label(subgraph_id), "Group");
     }
 
@@ -1181,7 +1182,7 @@ mod graph_editor_tests {
     fn add_group_io_node() {
         let mut ge = GraphEditor::new();
         let (_n1, n2, _n3) = build_chain(&mut ge);
-        let (group_node, _subgraph_id) = ge.group_nodes(&[n2]).unwrap();
+        let (group_node, _subgraph_id, _) = ge.group_nodes(&[n2]).unwrap();
 
         ge.enter_group(group_node);
 

@@ -148,7 +148,10 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
     };
     gs.full_sync_pub();
 
-    if let Some((gid, sub_id)) = cobble_group {
+    if let Some((gid, sub_id, port_map)) = cobble_group {
+        // Migrate param values from old port IDs to new subgraph port IDs
+        params.migrate_ports(&port_map);
+
         let cobble_header = NodeHeader { title: "Cobblestone".to_string(), color: [120, 90, 60], collapsed: false };
         gs.with_graph_mut(|g| {
             if let Some(h) = g.world.get_mut::<NodeHeader>(gid) {
@@ -209,7 +212,9 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
     };
     gs.full_sync_pub();
 
-    if let Some((gid, sub_id)) = grass_group {
+    if let Some((gid, sub_id, port_map)) = grass_group {
+        params.migrate_ports(&port_map);
+
         let grass_header = NodeHeader { title: "Grass".to_string(), color: [50, 120, 40], collapsed: false };
         gs.with_graph_mut(|g| {
             if let Some(h) = g.world.get_mut::<NodeHeader>(gid) {

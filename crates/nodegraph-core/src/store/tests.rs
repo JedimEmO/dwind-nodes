@@ -527,7 +527,7 @@ fn serialization_roundtrip_with_subgraphs() {
     ge.current_graph_mut().connect(b_out, c_in).unwrap();
 
     // Group B
-    let (group_node, _subgraph_id) = ge.group_nodes(&[b]).unwrap();
+    let (group_node, _subgraph_id, _) = ge.group_nodes(&[b]).unwrap();
 
     // Serialize root graph
     let root_serialized = ge.current_graph().serialize();
@@ -576,7 +576,7 @@ fn graph_editor_full_roundtrip() {
     ge.current_graph_mut().connect(b_out, c_in).unwrap();
 
     // Group B
-    let (_group_node, _subgraph_id) = ge.group_nodes(&[b]).unwrap();
+    let (_group_node, _subgraph_id, _) = ge.group_nodes(&[b]).unwrap();
 
     // Serialize entire editor
     let serialized = ge.serialize_editor();
