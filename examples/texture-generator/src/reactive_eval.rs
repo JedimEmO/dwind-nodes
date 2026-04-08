@@ -835,7 +835,7 @@ impl ReactiveEval {
 
     fn spawn_group(
         &self,
-        _node_id: EntityId,
+        node_id: EntityId,
         ports: &[(EntityId, PortDirection, SocketType, String)],
         alive: Rc<Cell<bool>>,
     ) {
@@ -910,6 +910,68 @@ impl ReactiveEval {
                     async {}
                 })
                 .await;
+            });
+        }
+
+        // Also watch internal subgraph param signals so edits inside the group
+        // trigger recomputation of group outputs.
+        {
+            let subgraph_id = self.gs.with_graph(|g| {
+                g.world.get::<SubgraphRoot>(node_id).map(|s| s.0)
+            });
+            if let Some(sub_id) = subgraph_id {
+                let internal_ports: Vec<(EntityId, SocketType)> = {
+                    let editor = self.gs.editor.borrow();
+                    if let Some(sub) = editor.graph(sub_id) {
+                        sub.world.query::<nodegraph_core::graph::node::NodeHeader>()
+                            .flat_map(|(nid, _)| {
+                                sub.node_ports(nid).iter().filter_map(|&pid| {
+                                    let st = sub.world.get::<PortSocketType>(pid).map(|s| s.0)?;
+                                    Some((pid, st))
+                                }).collect::<Vec<_>>()
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                };
+                for (pid, st) in internal_ports {
+                    let version = version.clone();
+                    match st {
+                        SocketType::Float => {
+                            let m = self.params.get_float(pid, crate::params::default_float("", ""));
+                            wasm_bindgen_futures::spawn_local(async move {
+                                m.signal().for_each(move |_| {
+                                    version.set(version.get().wrapping_add(1));
+                                    async {}
+                                }).await;
+                            });
+                        }
+                        SocketType::Color => {
+                            let m = self.params.get_color(pid, crate::params::default_color("", ""));
+                            wasm_bindgen_futures::spawn_local(async move {
+                                m.signal().for_each(move |_| {
+                                    version.set(version.get().wrapping_add(1));
+                                    async {}
+                                }).await;
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Also bump version when the connection list changes (handles reconnects inside the group)
+        {
+            let version = version.clone();
+            let gs2 = self.gs.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                gs2.connection_list.signal_vec_cloned().to_signal_cloned()
+                    .for_each(move |_| {
+                        version.set(version.get().wrapping_add(1));
+                        async {}
+                    }).await;
             });
         }
 

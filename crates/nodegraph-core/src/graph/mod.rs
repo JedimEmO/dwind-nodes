@@ -410,9 +410,12 @@ pub struct GraphEditor {
 }
 
 impl GraphEditor {
+    /// Entity ID block size for each graph (root and subgraphs).
+    const BLOCK_SIZE: u32 = 10_000;
+
     pub fn new() -> Self {
-        let root = NodeGraph::new();
-        // Use a synthetic EntityId for the root graph
+        // Root graph gets block [0, BLOCK_SIZE) — bounded like subgraphs.
+        let root = NodeGraph::new_with_start(0, Self::BLOCK_SIZE);
         let root_id = EntityId { index: 0, generation: crate::store::Generation::default() };
         let mut graphs = HashMap::new();
         graphs.insert(root_id, root);
@@ -423,7 +426,7 @@ impl GraphEditor {
             current_graph_id: root_id,
             breadcrumb: vec![root_id],
             next_graph_id: 1,
-            next_entity_start: 10_000,
+            next_entity_start: Self::BLOCK_SIZE,
             subgraph_parents: HashMap::new(),
             io_port_mapping: HashMap::new(),
         }
@@ -496,11 +499,25 @@ impl GraphEditor {
     pub fn group_nodes(&mut self, node_ids: &[EntityId]) -> Option<(EntityId, EntityId)> {
         if node_ids.is_empty() { return None; }
 
+        // Preflight: estimate required entities for the subgraph and bail if it won't fit.
+        // Each grouped node needs 1 entity + N port entities. Plus IO nodes, IO ports, connections.
+        let parent_ref = self.graphs.get(&self.current_graph_id)?;
+        let mut estimated_entities: u32 = 0;
+        for &nid in node_ids {
+            estimated_entities += 1; // the node
+            estimated_entities += parent_ref.node_ports(nid).len() as u32; // its ports
+        }
+        // IO nodes + their ports (upper bound: 2 per external connection, each = 1 node + 1 port)
+        // Plus internal connections (1 entity each). Conservatively double the estimate.
+        estimated_entities *= 3;
+        if estimated_entities > Self::BLOCK_SIZE {
+            return None; // selection too large for a subgraph block
+        }
+
         let subgraph_id = self.alloc_graph_id();
         let start = self.next_entity_start;
-        self.next_entity_start += 10_000;
-        let block_size = 10_000;
-        let mut subgraph = NodeGraph::new_with_start(start, block_size);
+        self.next_entity_start += Self::BLOCK_SIZE;
+        let mut subgraph = NodeGraph::new_with_start(start, Self::BLOCK_SIZE);
 
         let current_id = self.current_graph_id;
         let parent = self.graphs.get_mut(&current_id)?;
@@ -678,9 +695,9 @@ impl GraphEditor {
         }
 
         debug_assert!(
-            subgraph.world.entity_count() < 10_000,
-            "Subgraph entity count {} exceeds block size — risk of ID collision",
-            subgraph.world.entity_count()
+            (subgraph.world.entity_count() as u32) < Self::BLOCK_SIZE,
+            "Subgraph entity count {} exceeds block size {} — risk of ID collision",
+            subgraph.world.entity_count(), Self::BLOCK_SIZE
         );
 
         self.graphs.insert(subgraph_id, subgraph);
@@ -1018,7 +1035,7 @@ impl GraphEditor {
             current_graph_id: root_graph_id,
             breadcrumb: vec![root_graph_id],
             next_graph_id: data.next_graph_id,
-            next_entity_start: data.next_graph_id as u32 * 10_000 + 10_000,
+            next_entity_start: data.next_graph_id as u32 * Self::BLOCK_SIZE + Self::BLOCK_SIZE,
             subgraph_parents,
             io_port_mapping,
         })
