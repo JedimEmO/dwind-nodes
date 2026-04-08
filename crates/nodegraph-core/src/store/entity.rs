@@ -25,13 +25,20 @@ pub struct EntityId {
     pub generation: Generation,
 }
 
+/// Entity allocator that produces globally-unique EntityIds.
+///
+/// Internally uses 0-based local indices. A `start_offset` is added to produce
+/// the global `EntityId.index`, ensuring disjoint ID ranges across multiple Worlds.
+/// An optional `max_local` enforces block size limits without padding vectors.
 #[derive(Clone)]
 pub struct EntityAllocator {
     generations: Vec<Generation>,
     free_list: Vec<u32>,
     alive: Vec<bool>,
-    /// Upper bound on entity index (exclusive). None = unbounded (root graph).
-    max_index: Option<u32>,
+    /// Added to local index to produce the global EntityId.index.
+    start_offset: u32,
+    /// Maximum number of entities this allocator can hold (None = unbounded).
+    max_local: Option<u32>,
 }
 
 impl EntityAllocator {
@@ -40,42 +47,47 @@ impl EntityAllocator {
             generations: Vec::new(),
             free_list: Vec::new(),
             alive: Vec::new(),
-            max_index: None,
+            start_offset: 0,
+            max_local: None,
         }
     }
 
-    /// Create an allocator that starts allocating entity indices from `start`.
-    /// Indices 0..start are reserved (dead) so they never collide with other allocators.
-    /// `block_size` sets the maximum number of entities this allocator can create.
+    /// Create an allocator whose EntityIds start from `start` with at most
+    /// `block_size` entities. No vectors are padded — only `start_offset` is stored.
     pub fn new_with_start(start: u32, block_size: u32) -> Self {
-        let n = start as usize;
         Self {
-            generations: vec![Generation::new(); n],
+            generations: Vec::new(),
             free_list: Vec::new(),
-            alive: vec![false; n],
-            max_index: Some(start + block_size),
+            alive: Vec::new(),
+            start_offset: start,
+            max_local: Some(block_size),
         }
+    }
+
+    pub fn start_offset(&self) -> u32 {
+        self.start_offset
     }
 
     pub fn allocate(&mut self) -> EntityId {
-        if let Some(index) = self.free_list.pop() {
-            self.alive[index as usize] = true;
+        if let Some(local_index) = self.free_list.pop() {
+            self.alive[local_index as usize] = true;
             EntityId {
-                index,
-                generation: self.generations[index as usize],
+                index: local_index + self.start_offset,
+                generation: self.generations[local_index as usize],
             }
         } else {
-            let index = self.generations.len() as u32;
-            if let Some(max) = self.max_index {
+            let local_index = self.generations.len() as u32;
+            if let Some(max) = self.max_local {
                 assert!(
-                    index < max,
-                    "entity allocator exceeded block range: index {index} >= max {max}"
+                    local_index < max,
+                    "entity allocator exceeded block range: local {local_index} >= max {max} (offset {})",
+                    self.start_offset
                 );
             }
             self.generations.push(Generation::new());
             self.alive.push(true);
             EntityId {
-                index,
+                index: local_index + self.start_offset,
                 generation: Generation::new(),
             }
         }
@@ -85,18 +97,21 @@ impl EntityAllocator {
         if !self.is_alive(id) {
             return false;
         }
-        let idx = id.index as usize;
-        self.alive[idx] = false;
-        self.generations[idx].increment();
-        self.free_list.push(id.index);
+        let local_idx = (id.index - self.start_offset) as usize;
+        self.alive[local_idx] = false;
+        self.generations[local_idx].increment();
+        self.free_list.push(id.index - self.start_offset);
         true
     }
 
     pub fn is_alive(&self, id: EntityId) -> bool {
-        let idx = id.index as usize;
-        idx < self.generations.len()
-            && self.generations[idx] == id.generation
-            && self.alive[idx]
+        if id.index < self.start_offset {
+            return false;
+        }
+        let local_idx = (id.index - self.start_offset) as usize;
+        local_idx < self.generations.len()
+            && self.generations[local_idx] == id.generation
+            && self.alive[local_idx]
     }
 
     pub fn alive_count(&self) -> usize {

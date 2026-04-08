@@ -27,12 +27,14 @@ impl<'w, T: Clone + 'static> Iterator for Query1<'w, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let store = self.store?;
+        let offset = self.world.start_offset();
         while self.index < self.len {
             let idx = self.index;
             self.index += 1;
             if let Some((gen, data)) = store.get_by_index(idx) {
+                // Translate local index → global EntityId
                 let id = EntityId {
-                    index: idx as u32,
+                    index: idx as u32 + offset,
                     generation: *gen,
                 };
                 if self.world.is_alive(id) {

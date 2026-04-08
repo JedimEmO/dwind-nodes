@@ -40,12 +40,25 @@ impl World {
     }
 
     /// Create a World whose entity IDs start from `start_index` with a maximum
-    /// of `block_size` entities. Prevents ID collisions when multiple Worlds coexist.
+    /// of `block_size` entities. No vectors are padded — only the offset is stored.
     pub fn new_with_start(start_index: u32, block_size: u32) -> Self {
         Self {
             allocator: entity::EntityAllocator::new_with_start(start_index, block_size),
             components: HashMap::new(),
             change_tracker: ChangeTracker::new(),
+        }
+    }
+
+    /// The offset added to local indices to produce global EntityId.index values.
+    pub fn start_offset(&self) -> u32 {
+        self.allocator.start_offset()
+    }
+
+    /// Translate a global EntityId to a local EntityId (for ComponentStore access).
+    fn to_local(&self, id: EntityId) -> EntityId {
+        EntityId {
+            index: id.index - self.start_offset(),
+            generation: id.generation,
         }
     }
 
@@ -57,9 +70,6 @@ impl World {
         if !self.allocator.is_alive(id) {
             return false;
         }
-        // Component data remains in storage but becomes inaccessible:
-        // generation bump makes all ComponentStore::get(old_id) return None.
-        // When the slot is reused, insert() overwrites the old data.
         self.allocator.deallocate(id)
     }
 
@@ -91,14 +101,16 @@ impl World {
             return;
         }
         self.change_tracker.record::<T>(id);
-        self.get_store_mut::<T>().insert(id, component);
+        let local = self.to_local(id);
+        self.get_store_mut::<T>().insert(local, component);
     }
 
     pub fn get<T: Clone + 'static>(&self, id: EntityId) -> Option<&T> {
         if !self.allocator.is_alive(id) {
             return None;
         }
-        self.get_store::<T>()?.get(id)
+        let local = self.to_local(id);
+        self.get_store::<T>()?.get(local)
     }
 
     pub fn get_mut<T: Clone + 'static>(&mut self, id: EntityId) -> Option<&mut T> {
@@ -106,10 +118,11 @@ impl World {
             return None;
         }
         self.change_tracker.record::<T>(id);
+        let local = self.to_local(id);
         self.components
             .get_mut(&TypeId::of::<T>())
             .and_then(|b| b.as_any_mut().downcast_mut::<ComponentStore<T>>())
-            .and_then(|store| store.get_mut(id))
+            .and_then(|store| store.get_mut(local))
     }
 
     pub fn remove<T: Clone + 'static>(&mut self, id: EntityId) -> Option<T> {
@@ -117,18 +130,20 @@ impl World {
             return None;
         }
         self.change_tracker.record::<T>(id);
+        let local = self.to_local(id);
         self.components
             .get_mut(&TypeId::of::<T>())
             .and_then(|b| b.as_any_mut().downcast_mut::<ComponentStore<T>>())
-            .and_then(|store| store.remove(id))
+            .and_then(|store| store.remove(local))
     }
 
     pub fn has<T: Clone + 'static>(&self, id: EntityId) -> bool {
         if !self.allocator.is_alive(id) {
             return false;
         }
+        let local = self.to_local(id);
         self.get_store::<T>()
-            .map(|store| store.get(id).is_some())
+            .map(|store| store.get(local).is_some())
             .unwrap_or(false)
     }
 
