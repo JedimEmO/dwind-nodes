@@ -985,6 +985,15 @@ impl ReactiveEval {
                             let editor = gs.editor.borrow();
                             eval::evaluate(&editor, &snap)
                         };
+                        // Reset all outputs to defaults first, then apply results.
+                        // This clears stale values when internal connections are removed.
+                        let black = Rc::new(TextureBuffer::new());
+                        for m in tex_outputs.values() {
+                            m.set(black.clone());
+                        }
+                        for m in color_outputs.values() {
+                            m.set([0, 0, 0, 255]);
+                        }
                         for (&pid, m) in &tex_outputs {
                             if let Some(tex) = result.textures.get(&pid) {
                                 m.set(tex.clone());
