@@ -167,6 +167,28 @@ pub fn register_all(reg: &mut NodeTypeRegistry) {
         ],
         output_ports: vec![],
     });
+
+    // === Group IO (only functional inside a subgraph) ===
+
+    reg.register(NodeTypeDefinition {
+        type_id: "group_input".into(),
+        display_name: "Group Input".into(),
+        category: "Group".into(),
+        input_ports: vec![],
+        output_ports: vec![
+            PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into() },
+        ],
+    });
+
+    reg.register(NodeTypeDefinition {
+        type_id: "group_output".into(),
+        display_name: "Group Output".into(),
+        category: "Group".into(),
+        input_ports: vec![
+            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into() },
+        ],
+        output_ports: vec![],
+    });
 }
 
 #[cfg(test)]
@@ -182,10 +204,10 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    fn register_all_thirteen_types() {
+    fn register_all_fifteen_types() {
         let reg = make_registry();
-        // 5 generators + 5 filters + 3 outputs = 13
-        assert_eq!(reg.all().len(), 13);
+        // 5 generators + 5 filters + 3 outputs + 2 group IO = 15
+        assert_eq!(reg.all().len(), 15);
     }
 
     #[wasm_bindgen_test]
