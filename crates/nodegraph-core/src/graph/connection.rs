@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::store::EntityId;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConnectionEndpoints {

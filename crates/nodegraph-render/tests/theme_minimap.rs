@@ -18,7 +18,11 @@ impl TestContainer {
     fn new() -> Self {
         let doc = web_sys::window().unwrap().document().unwrap();
         let el = doc.create_element("div").unwrap();
-        el.set_attribute("style", "position:absolute;left:0;top:0;width:800px;height:600px").unwrap();
+        el.set_attribute(
+            "style",
+            "position:absolute;left:0;top:0;width:800px;height:600px",
+        )
+        .unwrap();
         doc.body().unwrap().append_child(&el).unwrap();
         Self { element: el }
     }
@@ -66,7 +70,10 @@ fn test_canvas_uses_theme_bg() {
     for i in 0..all_divs.length() {
         if let Some(el) = all_divs.get(i) {
             if let Ok(html_el) = el.dyn_into::<web_sys::HtmlElement>() {
-                let bg = html_el.style().get_property_value("background").unwrap_or_default();
+                let bg = html_el
+                    .style()
+                    .get_property_value("background")
+                    .unwrap_or_default();
                 if bg.contains("26, 26, 46") || bg.contains("1a1a2e") {
                     found = true;
                     break;
@@ -74,15 +81,20 @@ fn test_canvas_uses_theme_bg() {
             }
         }
     }
-    assert!(found, "Should find a div with theme canvas_bg applied via style property");
+    assert!(
+        found,
+        "Should find a div with theme canvas_bg applied via style property"
+    );
 }
 
 #[wasm_bindgen_test]
 async fn test_node_uses_theme_colors() {
     let gs = GraphSignals::new();
-    let (_n, _) = gs.add_node("Test", (100.0, 100.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
+    let (_n, _) = gs.add_node(
+        "Test",
+        (100.0, 100.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
     let _tc = render_sync(&gs);
     flush_microtasks().await;
 
@@ -91,8 +103,11 @@ async fn test_node_uses_theme_colors() {
     let node_rect = doc.query_selector("[data-node-id] rect").unwrap();
     assert!(node_rect.is_some(), "Node rect should exist");
     let fill = node_rect.unwrap().get_attribute("fill").unwrap_or_default();
-    assert_eq!(fill, gs.theme.node_bg,
-        "Node body fill should be theme.node_bg '{}', got '{}'", gs.theme.node_bg, fill);
+    assert_eq!(
+        fill, gs.theme.node_bg,
+        "Node body fill should be theme.node_bg '{}', got '{}'",
+        gs.theme.node_bg, fill
+    );
 }
 
 // ============================================================
@@ -102,7 +117,7 @@ async fn test_node_uses_theme_colors() {
 #[wasm_bindgen_test]
 async fn test_minimap_container_exists() {
     let gs = GraphSignals::new();
-    (gs.add_node("A", (0.0, 0.0), vec![])).0;
+    gs.add_node("A", (0.0, 0.0), vec![]);
     let _tc = render_sync(&gs);
     flush_microtasks().await;
 
@@ -114,7 +129,7 @@ async fn test_minimap_container_exists() {
 #[wasm_bindgen_test]
 async fn test_minimap_viewport_rect_exists() {
     let gs = GraphSignals::new();
-    (gs.add_node("A", (0.0, 0.0), vec![])).0;
+    gs.add_node("A", (0.0, 0.0), vec![]);
     let _tc = render_sync(&gs);
     flush_microtasks().await;
 
@@ -126,12 +141,16 @@ async fn test_minimap_viewport_rect_exists() {
 #[wasm_bindgen_test]
 async fn test_minimap_has_node_rects() {
     let gs = GraphSignals::new();
-    let _ = gs.add_node("A", (0.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
-    let _ = gs.add_node("B", (300.0, 200.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
+    let _ = gs.add_node(
+        "A",
+        (0.0, 0.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
+    let _ = gs.add_node(
+        "B",
+        (300.0, 200.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
     let _tc = render_sync(&gs);
     flush_microtasks().await;
 
@@ -139,19 +158,26 @@ async fn test_minimap_has_node_rects() {
     let minimap = doc.query_selector("[data-minimap] svg").unwrap().unwrap();
     let rects = minimap.query_selector_all("rect").unwrap();
     // Should have at least 2 node rects + 1 viewport rect = 3
-    assert!(rects.length() >= 3,
-        "Minimap should have at least 3 rects (2 nodes + viewport), got {}", rects.length());
+    assert!(
+        rects.length() >= 3,
+        "Minimap should have at least 3 rects (2 nodes + viewport), got {}",
+        rects.length()
+    );
 }
 
 #[wasm_bindgen_test]
 async fn test_minimap_connection_lines() {
     let gs = GraphSignals::new();
-    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n2, _) = gs.add_node("B", (300.0, 200.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
+    let (n1, _) = gs.add_node(
+        "A",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (n2, _) = gs.add_node(
+        "B",
+        (300.0, 200.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
     let (out, inp) = gs.with_graph(|g| (g.node_ports(n1)[0], g.node_ports(n2)[0]));
     gs.connect_ports(out, inp).unwrap();
     let _tc = render_sync(&gs);
@@ -160,6 +186,9 @@ async fn test_minimap_connection_lines() {
     let doc = web_sys::window().unwrap().document().unwrap();
     let minimap = doc.query_selector("[data-minimap] svg").unwrap().unwrap();
     let lines = minimap.query_selector_all("line").unwrap();
-    assert!(lines.length() >= 1,
-        "Minimap should have at least 1 connection line, got {}", lines.length());
+    assert!(
+        lines.length() >= 1,
+        "Minimap should have at least 1 connection line, got {}",
+        lines.length()
+    );
 }

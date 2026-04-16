@@ -1,8 +1,8 @@
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
 use dominator::{clone, events, html, with_node, Dom, EventOptions};
 use futures_signals::signal::{LocalBoxSignal, Mutable, SignalExt};
 use futures_signals_component_macro::component;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
 
 /// Trait for reading/writing a float value reactively.
@@ -16,14 +16,24 @@ impl FloatValueWrapper for Mutable<f64> {
     fn value_signal(&self) -> LocalBoxSignal<'static, f64> {
         Box::pin(self.signal())
     }
-    fn set_value(&self, val: f64) { self.set(val); }
-    fn get_value(&self) -> f64 { self.get() }
+    fn set_value(&self, val: f64) {
+        self.set(val);
+    }
+    fn get_value(&self) -> f64 {
+        self.get()
+    }
 }
 
 impl<T: FloatValueWrapper + ?Sized> FloatValueWrapper for Box<T> {
-    fn value_signal(&self) -> LocalBoxSignal<'static, f64> { (**self).value_signal() }
-    fn set_value(&self, val: f64) { (**self).set_value(val) }
-    fn get_value(&self) -> f64 { (**self).get_value() }
+    fn value_signal(&self) -> LocalBoxSignal<'static, f64> {
+        (**self).value_signal()
+    }
+    fn set_value(&self, val: f64) {
+        (**self).set_value(val)
+    }
+    fn get_value(&self) -> f64 {
+        (**self).get_value()
+    }
 }
 
 #[component(render_fn = float_input)]
@@ -65,9 +75,10 @@ pub fn float_input(props: FloatInputProps) -> Dom {
     let did_scrub = Mutable::new(false);
 
     // Closures stored here so we can remove them on mouseup
-    let move_closure: std::rc::Rc<std::cell::RefCell<Option<Closure<dyn FnMut(web_sys::MouseEvent)>>>> =
+    type MouseClosure = Closure<dyn FnMut(web_sys::MouseEvent)>;
+    let move_closure: std::rc::Rc<std::cell::RefCell<Option<MouseClosure>>> =
         std::rc::Rc::new(std::cell::RefCell::new(None));
-    let up_closure: std::rc::Rc<std::cell::RefCell<Option<Closure<dyn FnMut(web_sys::MouseEvent)>>>> =
+    let up_closure: std::rc::Rc<std::cell::RefCell<Option<MouseClosure>>> =
         std::rc::Rc::new(std::cell::RefCell::new(None));
 
     html!("div", {
@@ -216,7 +227,7 @@ pub fn float_input(props: FloatInputProps) -> Dom {
                     if is_editing {
                         element.set_value(&format_value(value.get_value()));
                         let _ = element.focus();
-                        let _ = element.select();
+                        element.select();
                     }
                     async {}
                 })))

@@ -1,6 +1,6 @@
-use crate::graph::NodeGraph;
 use crate::graph::node::{NodeHeader, NodePosition};
 use crate::graph::port::{PortDirection, PortIndex, PortOwner};
+use crate::graph::NodeGraph;
 use crate::store::EntityId;
 
 // Layout constants — matches typical Blender node proportions
@@ -87,7 +87,11 @@ pub fn compute_node_layout(graph: &NodeGraph, node_id: EntityId) -> Option<Compu
 
     for &port_id in ports {
         let dir = graph.world.get::<PortDirection>(port_id)?;
-        let idx = graph.world.get::<PortIndex>(port_id).map(|i| i.0).unwrap_or(0);
+        let idx = graph
+            .world
+            .get::<PortIndex>(port_id)
+            .map(|i| i.0)
+            .unwrap_or(0);
         match dir {
             PortDirection::Input => inputs.push((port_id, idx)),
             PortDirection::Output => outputs.push((port_id, idx)),
@@ -101,12 +105,14 @@ pub fn compute_node_layout(graph: &NodeGraph, node_id: EntityId) -> Option<Compu
     if is_reroute {
         let size = REROUTE_SIZE * 2.0;
         let total_rect = Rect::new(pos.x - REROUTE_SIZE, pos.y - REROUTE_SIZE, size, size);
-        let input_port_positions = inputs.iter().map(|&(pid, _)| {
-            (pid, Vec2::new(pos.x - REROUTE_SIZE, pos.y))
-        }).collect();
-        let output_port_positions = outputs.iter().map(|&(pid, _)| {
-            (pid, Vec2::new(pos.x + REROUTE_SIZE, pos.y))
-        }).collect();
+        let input_port_positions = inputs
+            .iter()
+            .map(|&(pid, _)| (pid, Vec2::new(pos.x - REROUTE_SIZE, pos.y)))
+            .collect();
+        let output_port_positions = outputs
+            .iter()
+            .map(|&(pid, _)| (pid, Vec2::new(pos.x + REROUTE_SIZE, pos.y)))
+            .collect();
         return Some(ComputedNodeLayout {
             header_rect: total_rect,
             body_rect: total_rect,
@@ -123,16 +129,18 @@ pub fn compute_node_layout(graph: &NodeGraph, node_id: EntityId) -> Option<Compu
         let (input_port_positions, output_port_positions) = match kind {
             crate::graph::GroupIOKind::Input => {
                 // Input IO node has Output ports on the right edge
-                let out_positions = outputs.iter().map(|&(pid, _)| {
-                    (pid, Vec2::new(pos.x + IO_NODE_WIDTH, port_y))
-                }).collect();
+                let out_positions = outputs
+                    .iter()
+                    .map(|&(pid, _)| (pid, Vec2::new(pos.x + IO_NODE_WIDTH, port_y)))
+                    .collect();
                 (vec![], out_positions)
             }
             crate::graph::GroupIOKind::Output => {
                 // Output IO node has Input ports on the left edge
-                let in_positions = inputs.iter().map(|&(pid, _)| {
-                    (pid, Vec2::new(pos.x, port_y))
-                }).collect();
+                let in_positions = inputs
+                    .iter()
+                    .map(|&(pid, _)| (pid, Vec2::new(pos.x, port_y)))
+                    .collect();
                 (in_positions, vec![])
             }
         };
@@ -146,7 +154,9 @@ pub fn compute_node_layout(graph: &NodeGraph, node_id: EntityId) -> Option<Compu
     }
 
     let num_rows = inputs.len().max(outputs.len());
-    let custom_body_h = graph.world.get::<crate::graph::node::CustomBodyHeight>(node_id)
+    let custom_body_h = graph
+        .world
+        .get::<crate::graph::node::CustomBodyHeight>(node_id)
         .map(|h| h.0)
         .unwrap_or(0.0);
     let body_height = if header.collapsed {
@@ -231,10 +241,14 @@ impl BezierPath {
     pub fn to_svg_d(&self) -> String {
         format!(
             "M {} {} C {} {}, {} {}, {} {}",
-            self.start.x, self.start.y,
-            self.cp1.x, self.cp1.y,
-            self.cp2.x, self.cp2.y,
-            self.end.x, self.end.y,
+            self.start.x,
+            self.start.y,
+            self.cp1.x,
+            self.cp1.y,
+            self.cp2.x,
+            self.cp2.y,
+            self.end.x,
+            self.end.y,
         )
     }
 
@@ -342,7 +356,7 @@ pub struct LayoutCache {
 impl LayoutCache {
     pub fn compute(graph: &NodeGraph) -> Self {
         use crate::graph::connection::ConnectionEndpoints;
-        use crate::graph::frame::{FrameRect, FrameMembers};
+        use crate::graph::frame::{FrameMembers, FrameRect};
 
         let mut layouts = std::collections::HashMap::new();
         for (node_id, _) in graph.world.query::<NodeHeader>() {
@@ -368,7 +382,11 @@ impl LayoutCache {
             }
         }
 
-        Self { layouts, connection_paths, frame_rects }
+        Self {
+            layouts,
+            connection_paths,
+            frame_rects,
+        }
     }
 
     pub fn node_layout(&self, node_id: EntityId) -> Option<&ComputedNodeLayout> {

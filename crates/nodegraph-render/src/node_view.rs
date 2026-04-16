@@ -1,25 +1,29 @@
 use std::rc::Rc;
 
-use dominator::{html, Dom, clone, svg, events, EventOptions};
+use dominator::{clone, events, html, svg, Dom, EventOptions};
+use futures_signals::map_ref;
 use futures_signals::signal::{Mutable, SignalExt};
 use futures_signals::signal_vec::SignalVecExt;
-use futures_signals::map_ref;
 
-use nodegraph_core::graph::node::{NodeHeader, MuteState};
-use nodegraph_core::graph::port::{PortDirection, PortSocketType, PortLabel, PortIndex};
-use nodegraph_core::layout::{HEADER_HEIGHT, PORT_HEIGHT, NODE_MIN_WIDTH, PORT_RADIUS, Vec2};
+use nodegraph_core::graph::node::{MuteState, NodeHeader};
+use nodegraph_core::graph::port::{PortDirection, PortIndex, PortLabel, PortSocketType};
+use nodegraph_core::layout::{Vec2, HEADER_HEIGHT, NODE_MIN_WIDTH, PORT_HEIGHT, PORT_RADIUS};
 use nodegraph_core::store::EntityId;
 use nodegraph_core::types::socket_type::SocketType;
 
-use crate::graph_signals::{GraphSignals, ATTR_NODE_ID, ATTR_PORT_ID, is_valid_connection_target};
+use crate::graph_signals::{is_valid_connection_target, GraphSignals, ATTR_NODE_ID, ATTR_PORT_ID};
 
 pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
-    let pos_signal = gs.get_node_position_signal(node_id)
+    let pos_signal = gs
+        .get_node_position_signal(node_id)
         .unwrap_or_else(|| Mutable::new((0.0, 0.0)));
-    let header_signal = gs.get_node_header_signal(node_id)
-        .unwrap_or_else(|| Mutable::new(NodeHeader {
-            title: "?".to_string(), color: [100, 100, 100], collapsed: false,
-        }));
+    let header_signal = gs.get_node_header_signal(node_id).unwrap_or_else(|| {
+        Mutable::new(NodeHeader {
+            title: "?".to_string(),
+            color: [100, 100, 100],
+            collapsed: false,
+        })
+    });
     let selection = gs.selection.clone();
 
     let editor = gs.editor.borrow();
@@ -28,9 +32,21 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     let mut input_ports = Vec::new();
     let mut output_ports = Vec::new();
     for &pid in &ports {
-        let dir = graph.world.get::<PortDirection>(pid).copied().unwrap_or(PortDirection::Input);
-        let st = graph.world.get::<PortSocketType>(pid).map(|s| s.0).unwrap_or(SocketType::Float);
-        let label = graph.world.get::<PortLabel>(pid).map(|l| l.0.clone()).unwrap_or_default();
+        let dir = graph
+            .world
+            .get::<PortDirection>(pid)
+            .copied()
+            .unwrap_or(PortDirection::Input);
+        let st = graph
+            .world
+            .get::<PortSocketType>(pid)
+            .map(|s| s.0)
+            .unwrap_or(SocketType::Float);
+        let label = graph
+            .world
+            .get::<PortLabel>(pid)
+            .map(|l| l.0.clone())
+            .unwrap_or_default();
         let idx = graph.world.get::<PortIndex>(pid).map(|i| i.0).unwrap_or(0);
         match dir {
             PortDirection::Input => input_ports.push((pid, st, label, idx)),
@@ -40,35 +56,76 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     input_ports.sort_by_key(|&(_, _, _, idx)| idx);
     output_ports.sort_by_key(|&(_, _, _, idx)| idx);
 
-    let header = graph.world.get::<NodeHeader>(node_id).cloned()
-        .unwrap_or(NodeHeader { title: "?".to_string(), color: [100, 100, 100], collapsed: false });
-    let is_muted = graph.world.get::<MuteState>(node_id).map(|m| m.0).unwrap_or(false);
-    let is_group = graph.world.get::<nodegraph_core::graph::group::SubgraphRoot>(node_id).is_some();
-    let io_kind = graph.world.get::<nodegraph_core::graph::GroupIOKind>(node_id).cloned();
-    let is_reroute = graph.world.get::<nodegraph_core::graph::reroute::IsReroute>(node_id).is_some();
+    let header = graph
+        .world
+        .get::<NodeHeader>(node_id)
+        .cloned()
+        .unwrap_or(NodeHeader {
+            title: "?".to_string(),
+            color: [100, 100, 100],
+            collapsed: false,
+        });
+    let is_muted = graph
+        .world
+        .get::<MuteState>(node_id)
+        .map(|m| m.0)
+        .unwrap_or(false);
+    let is_group = graph
+        .world
+        .get::<nodegraph_core::graph::group::SubgraphRoot>(node_id)
+        .is_some();
+    let io_kind = graph
+        .world
+        .get::<nodegraph_core::graph::GroupIOKind>(node_id)
+        .cloned();
+    let is_reroute = graph
+        .world
+        .get::<nodegraph_core::graph::reroute::IsReroute>(node_id)
+        .is_some();
     drop(editor);
 
     // Group IO nodes render as small labeled rects
     if let Some(kind) = io_kind {
-        return render_group_io(node_id, pos_signal, selection, &input_ports, &output_ports, kind, gs);
+        return render_group_io(
+            node_id,
+            pos_signal,
+            selection,
+            &input_ports,
+            &output_ports,
+            kind,
+            gs,
+        );
     }
 
     // Reroute nodes render as a small diamond
     if is_reroute {
-        return render_reroute(node_id, pos_signal, selection, &input_ports, &output_ports, gs);
+        return render_reroute(
+            node_id,
+            pos_signal,
+            selection,
+            &input_ports,
+            &output_ports,
+            gs,
+        );
     }
 
-
     let collapsed = header.collapsed;
-    let num_rows = if collapsed { 0 } else { input_ports.len().max(output_ports.len()) };
+    let num_rows = if collapsed {
+        0
+    } else {
+        input_ports.len().max(output_ports.len())
+    };
     let has_custom_body = gs.custom_node_body.borrow().is_some();
     let custom_body_height = if has_custom_body {
         gs.with_graph(|g| {
-            g.world.get::<nodegraph_core::graph::node::CustomBodyHeight>(node_id)
+            g.world
+                .get::<nodegraph_core::graph::node::CustomBodyHeight>(node_id)
                 .map(|h| h.0)
                 .unwrap_or(PORT_HEIGHT)
         })
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     let total_height = HEADER_HEIGHT + num_rows as f64 * PORT_HEIGHT + custom_body_height;
     let [hr, hg, hb] = header.color;
 
@@ -104,7 +161,6 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
             .attr("rx", "6")
             .attr("fill", "none")
             .attr_signal("stroke", {
-                let node_id = node_id;
                 let highlight = gs.theme.selection_highlight;
                 selection.signal_cloned().map(move |sel| {
                     if sel.contains(&node_id) { highlight } else { "none" }
@@ -268,9 +324,17 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_port(
-    port_id: EntityId, socket_type: SocketType, direction: PortDirection,
-    cx: f64, cy: f64, r: u8, g: u8, b: u8, gs: &Rc<GraphSignals>,
+    port_id: EntityId,
+    socket_type: SocketType,
+    direction: PortDirection,
+    cx: f64,
+    cy: f64,
+    r: u8,
+    g: u8,
+    b: u8,
+    gs: &Rc<GraphSignals>,
 ) -> Dom {
     svg!("g", {
         // Invisible larger hit target
@@ -306,9 +370,6 @@ fn render_port(
             .attr("pointer-events", "none")
 
             .attr_signal("transform", {
-                let port_id = port_id;
-                let socket_type = socket_type;
-                let direction = direction;
                 map_ref! {
                     let cf = gs.connecting_from.signal_cloned(),
                     let drop = gs.drop_target_port.signal_cloned() => {
@@ -367,7 +428,6 @@ fn render_reroute(
             .attr("points", &diamond)
             .attr("fill", "none")
             .attr_signal("stroke", {
-                let node_id = node_id;
                 let highlight = gs.theme.selection_highlight;
                 selection.signal_cloned().map(move |sel| {
                     if sel.contains(&node_id) { highlight } else { "none" }
@@ -396,12 +456,13 @@ fn render_group_io(
     io_kind: nodegraph_core::graph::GroupIOKind,
     gs: &Rc<GraphSignals>,
 ) -> Dom {
-    use nodegraph_core::layout::{IO_NODE_WIDTH, IO_NODE_HEIGHT};
     use nodegraph_core::graph::GroupIOKind;
+    use nodegraph_core::layout::{IO_NODE_HEIGHT, IO_NODE_WIDTH};
 
     let is_input = matches!(io_kind, GroupIOKind::Input);
 
-    let title = gs.get_node_header_signal(node_id)
+    let title = gs
+        .get_node_header_signal(node_id)
         .map(|m| m.get_cloned().title)
         .unwrap_or_else(|| "IO".to_string());
 
@@ -410,10 +471,15 @@ fn render_group_io(
         output_ports.first().map(|(_, st, _, _)| st.default_color())
     } else {
         input_ports.first().map(|(_, st, _, _)| st.default_color())
-    }.unwrap_or([160, 160, 160]);
+    }
+    .unwrap_or([160, 160, 160]);
 
     let [pr, pg, pb] = port_color;
-    let bg_color = if is_input { gs.theme.io_node_input_bg } else { gs.theme.io_node_output_bg };
+    let bg_color = if is_input {
+        gs.theme.io_node_input_bg
+    } else {
+        gs.theme.io_node_output_bg
+    };
     let highlight = gs.theme.selection_highlight;
 
     svg!("g", {
@@ -437,7 +503,6 @@ fn render_group_io(
             .attr("rx", "4")
             .attr("fill", "none")
             .attr_signal("stroke", {
-                let node_id = node_id;
                 selection.signal_cloned().map(move |sel| {
                     if sel.contains(&node_id) { highlight } else { "none" }
                 })

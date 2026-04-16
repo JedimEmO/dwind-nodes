@@ -1,9 +1,11 @@
 use super::*;
-use crate::graph::NodeGraph;
-use crate::graph::port::PortDirection;
 use crate::graph::node::NodePosition;
-use crate::layout::{self, LayoutCache, Vec2, Rect, compute_node_layout, compute_port_world_position};
-use crate::layout::{HEADER_HEIGHT, PORT_HEIGHT, NODE_MIN_WIDTH};
+use crate::graph::port::PortDirection;
+use crate::graph::NodeGraph;
+use crate::layout::{
+    self, compute_node_layout, compute_port_world_position, LayoutCache, Rect, Vec2,
+};
+use crate::layout::{HEADER_HEIGHT, NODE_MIN_WIDTH, PORT_HEIGHT};
 use crate::types::socket_type::SocketType;
 use crate::viewport::Viewport;
 
@@ -32,7 +34,10 @@ fn make_test_graph() -> NodeGraph {
 
 #[test]
 fn viewport_screen_to_world() {
-    let vp = Viewport { pan: (100.0, 50.0), zoom: 2.0 };
+    let vp = Viewport {
+        pan: (100.0, 50.0),
+        zoom: 2.0,
+    };
     let (wx, wy) = vp.screen_to_world(0.0, 0.0);
     assert!((wx - (-50.0)).abs() < 1e-10);
     assert!((wy - (-25.0)).abs() < 1e-10);
@@ -40,7 +45,10 @@ fn viewport_screen_to_world() {
 
 #[test]
 fn viewport_world_to_screen() {
-    let vp = Viewport { pan: (100.0, 50.0), zoom: 2.0 };
+    let vp = Viewport {
+        pan: (100.0, 50.0),
+        zoom: 2.0,
+    };
     let (sx, sy) = vp.world_to_screen(0.0, 0.0);
     assert!((sx - 100.0).abs() < 1e-10);
     assert!((sy - 50.0).abs() < 1e-10);
@@ -48,7 +56,10 @@ fn viewport_world_to_screen() {
 
 #[test]
 fn viewport_roundtrip() {
-    let vp = Viewport { pan: (37.0, -12.0), zoom: 1.5 };
+    let vp = Viewport {
+        pan: (37.0, -12.0),
+        zoom: 1.5,
+    };
     let (sx, sy) = vp.world_to_screen(100.0, 200.0);
     let (wx, wy) = vp.screen_to_world(sx, sy);
     assert!((wx - 100.0).abs() < 1e-10);
@@ -57,7 +68,10 @@ fn viewport_roundtrip() {
 
 #[test]
 fn viewport_zoom_at_preserves_fixed_point() {
-    let mut vp = Viewport { pan: (100.0, 50.0), zoom: 1.0 };
+    let mut vp = Viewport {
+        pan: (100.0, 50.0),
+        zoom: 1.0,
+    };
     let screen_x = 400.0;
     let screen_y = 300.0;
 
@@ -125,7 +139,11 @@ fn node_layout_basic() {
     }
 
     // Ports are vertically spaced
-    let y_vals: Vec<f64> = layout.input_port_positions.iter().map(|(_, p)| p.y).collect();
+    let y_vals: Vec<f64> = layout
+        .input_port_positions
+        .iter()
+        .map(|(_, p)| p.y)
+        .collect();
     assert!(y_vals[1] > y_vals[0]);
     assert!(y_vals[2] > y_vals[1]);
     assert!((y_vals[1] - y_vals[0] - PORT_HEIGHT).abs() < 1e-10);
@@ -160,10 +178,7 @@ fn node_layout_collapsed() {
 
 #[test]
 fn bezier_path_svg() {
-    let path = layout::compute_connection_path(
-        Vec2::new(0.0, 0.0),
-        Vec2::new(200.0, 100.0),
-    );
+    let path = layout::compute_connection_path(Vec2::new(0.0, 0.0), Vec2::new(200.0, 100.0));
 
     let d = path.to_svg_d();
     assert!(d.starts_with("M 0 0 C "));
@@ -182,10 +197,7 @@ fn bezier_path_svg() {
 
 #[test]
 fn bezier_path_point_at_endpoints() {
-    let path = layout::compute_connection_path(
-        Vec2::new(10.0, 20.0),
-        Vec2::new(200.0, 100.0),
-    );
+    let path = layout::compute_connection_path(Vec2::new(10.0, 20.0), Vec2::new(200.0, 100.0));
 
     let p0 = path.point_at(0.0);
     assert!((p0.x - 10.0).abs() < 1e-10);
@@ -198,10 +210,7 @@ fn bezier_path_point_at_endpoints() {
 
 #[test]
 fn bezier_distance_to_point_on_curve() {
-    let path = layout::compute_connection_path(
-        Vec2::new(0.0, 0.0),
-        Vec2::new(200.0, 0.0),
-    );
+    let path = layout::compute_connection_path(Vec2::new(0.0, 0.0), Vec2::new(200.0, 0.0));
     // A point on the curve at t=0.5 should have ~0 distance
     let midpoint = path.point_at(0.5);
     let dist = path.distance_to_point(midpoint);
@@ -216,14 +225,17 @@ fn bezier_distance_to_point_on_curve() {
 fn hit_test_node() {
     let graph = make_test_graph();
     let cache = LayoutCache::compute(&graph);
-    let nodes: Vec<EntityId> = graph.world.query::<crate::graph::node::NodeHeader>()
+    let nodes: Vec<EntityId> = graph
+        .world
+        .query::<crate::graph::node::NodeHeader>()
         .map(|(id, _)| id)
         .collect();
 
     // Find "Node 1" (at 0,0)
-    let node1 = nodes.iter().find(|&&id| {
-        graph.world.get::<NodePosition>(id).unwrap().x == 0.0
-    }).unwrap();
+    let node1 = nodes
+        .iter()
+        .find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 0.0)
+        .unwrap();
 
     // Click inside node 1's header area
     let result = hit_test(&graph, &cache, Vec2::new(80.0, 10.0));
@@ -240,12 +252,15 @@ fn hit_test_port() {
     let cache = LayoutCache::compute(&graph);
 
     // Get node 1's output port position
-    let nodes: Vec<EntityId> = graph.world.query::<crate::graph::node::NodeHeader>()
+    let nodes: Vec<EntityId> = graph
+        .world
+        .query::<crate::graph::node::NodeHeader>()
         .map(|(id, _)| id)
         .collect();
-    let node1 = nodes.iter().find(|&&id| {
-        graph.world.get::<NodePosition>(id).unwrap().x == 0.0
-    }).unwrap();
+    let node1 = nodes
+        .iter()
+        .find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 0.0)
+        .unwrap();
 
     let layout = cache.node_layout(*node1).unwrap();
     let (out_port_id, out_port_pos) = layout.output_port_positions[0];
@@ -285,41 +300,54 @@ fn drag_node_moves_position() {
     let mut graph = make_test_graph();
     let mut ctrl = InteractionController::new();
 
-    let nodes: Vec<EntityId> = graph.world.query::<crate::graph::node::NodeHeader>()
+    let nodes: Vec<EntityId> = graph
+        .world
+        .query::<crate::graph::node::NodeHeader>()
         .map(|(id, _)| id)
         .collect();
-    let node1 = nodes.iter().find(|&&id| {
-        graph.world.get::<NodePosition>(id).unwrap().x == 0.0
-    }).copied().unwrap();
+    let node1 = nodes
+        .iter()
+        .find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 0.0)
+        .copied()
+        .unwrap();
 
     let orig_pos = graph.world.get::<NodePosition>(node1).unwrap().clone();
 
     // Click on node1 header area (center of header)
     let click_pos = Vec2::new(80.0, 10.0);
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: click_pos,
-        world: click_pos,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: click_pos,
+            world: click_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::DraggingNodes { .. }));
 
     // Move by (50, 30)
     let move_pos = Vec2::new(130.0, 40.0);
-    ctrl.handle_event(InputEvent::MouseMove {
-        screen: move_pos,
-        world: move_pos,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseMove {
+            screen: move_pos,
+            world: move_pos,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     // Release
-    ctrl.handle_event(InputEvent::MouseUp {
-        screen: move_pos,
-        world: move_pos,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: move_pos,
+            world: move_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::Idle));
 
@@ -334,31 +362,40 @@ fn pan_with_middle_mouse() {
     let mut ctrl = InteractionController::new();
 
     let start = Vec2::new(400.0, 300.0);
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: start,
-        world: start,
-        button: MouseButton::Middle,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: start,
+            world: start,
+            button: MouseButton::Middle,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::Panning { .. }));
 
     let moved = Vec2::new(450.0, 320.0);
-    ctrl.handle_event(InputEvent::MouseMove {
-        screen: moved,
-        world: moved,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseMove {
+            screen: moved,
+            world: moved,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     assert!((ctrl.viewport.pan.0 - 50.0).abs() < 1e-10);
     assert!((ctrl.viewport.pan.1 - 20.0).abs() < 1e-10);
 
-    ctrl.handle_event(InputEvent::MouseUp {
-        screen: moved,
-        world: moved,
-        button: MouseButton::Middle,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: moved,
+            world: moved,
+            button: MouseButton::Middle,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::Idle));
 }
@@ -382,36 +419,52 @@ fn connection_drag_creates_connection() {
     let in_pos = compute_port_world_position(&graph, inp).unwrap();
 
     // Mousedown on output port
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: out_pos,
-        world: out_pos,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: out_pos,
+            world: out_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
-    assert!(matches!(ctrl.state, InteractionState::ConnectingPort { .. }));
+    assert!(matches!(
+        ctrl.state,
+        InteractionState::ConnectingPort { .. }
+    ));
 
     // Move toward input
     let mid = Vec2::new(150.0, 0.0);
-    let effects = ctrl.handle_event(InputEvent::MouseMove {
-        screen: mid,
-        world: mid,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    let effects = ctrl.handle_event(
+        InputEvent::MouseMove {
+            screen: mid,
+            world: mid,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     // Should produce a preview wire effect
-    assert!(effects.iter().any(|e| matches!(e, SideEffect::PreviewWire { .. })));
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, SideEffect::PreviewWire { .. })));
 
     // Release on input port
-    let effects = ctrl.handle_event(InputEvent::MouseUp {
-        screen: in_pos,
-        world: in_pos,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    let effects = ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: in_pos,
+            world: in_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::Idle));
-    assert!(effects.iter().any(|e| matches!(e, SideEffect::ConnectionCreated(_))));
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, SideEffect::ConnectionCreated(_))));
     assert_eq!(graph.connection_count(), 1);
 }
 
@@ -427,22 +480,30 @@ fn connection_drag_incompatible_fails() {
     let out_pos = compute_port_world_position(&graph, out).unwrap();
     let in_pos = compute_port_world_position(&graph, inp).unwrap();
 
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: out_pos,
-        world: out_pos,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: out_pos,
+            world: out_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
-    let effects = ctrl.handle_event(InputEvent::MouseUp {
-        screen: in_pos,
-        world: in_pos,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    let effects = ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: in_pos,
+            world: in_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::Idle));
-    assert!(effects.iter().any(|e| matches!(e, SideEffect::ConnectionFailed)));
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, SideEffect::ConnectionFailed)));
     assert_eq!(graph.connection_count(), 0);
 }
 
@@ -455,20 +516,26 @@ fn connection_drag_release_on_empty_cancels() {
     let mut ctrl = InteractionController::new();
     let out_pos = compute_port_world_position(&graph, out).unwrap();
 
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: out_pos,
-        world: out_pos,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: out_pos,
+            world: out_pos,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     let far_away = Vec2::new(999.0, 999.0);
-    ctrl.handle_event(InputEvent::MouseUp {
-        screen: far_away,
-        world: far_away,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: far_away,
+            world: far_away,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::Idle));
     assert_eq!(graph.connection_count(), 0);
@@ -485,32 +552,43 @@ fn box_selection() {
 
     // Click on empty space to start box select
     let start = Vec2::new(-20.0, -20.0);
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: start,
-        world: start,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: start,
+            world: start,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::BoxSelecting { .. }));
 
     // Drag to cover first two nodes (at 0,0 and 300,0) but not third (600,200)
     let end = Vec2::new(500.0, 150.0);
-    let effects = ctrl.handle_event(InputEvent::MouseMove {
-        screen: end,
-        world: end,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    let effects = ctrl.handle_event(
+        InputEvent::MouseMove {
+            screen: end,
+            world: end,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
-    assert!(effects.iter().any(|e| matches!(e, SideEffect::BoxSelectRect { .. })));
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, SideEffect::BoxSelectRect { .. })));
 
     // Release
-    ctrl.handle_event(InputEvent::MouseUp {
-        screen: end,
-        world: end,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: end,
+            world: end,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::Idle));
     assert_eq!(ctrl.selection.selected.len(), 2);
@@ -523,36 +601,54 @@ fn box_selection_shift_adds() {
 
     // First select nodes at (0,0) and (300,0)
     let start = Vec2::new(-20.0, -20.0);
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: start,
-        world: start,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: start,
+            world: start,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
     let end = Vec2::new(500.0, 150.0);
-    ctrl.handle_event(InputEvent::MouseUp {
-        screen: end,
-        world: end,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: end,
+            world: end,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
     assert_eq!(ctrl.selection.selected.len(), 2);
 
     // Now shift-box-select to add node at (600,200)
     let start2 = Vec2::new(550.0, 150.0);
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: start2,
-        world: start2,
-        button: MouseButton::Left,
-        modifiers: Modifiers { shift: true, ..Default::default() },
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: start2,
+            world: start2,
+            button: MouseButton::Left,
+            modifiers: Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+        },
+        &mut graph,
+    );
     let end2 = Vec2::new(800.0, 400.0);
-    ctrl.handle_event(InputEvent::MouseUp {
-        screen: end2,
-        world: end2,
-        button: MouseButton::Left,
-        modifiers: Modifiers { shift: true, ..Default::default() },
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: end2,
+            world: end2,
+            button: MouseButton::Left,
+            modifiers: Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+        },
+        &mut graph,
+    );
 
     assert_eq!(ctrl.selection.selected.len(), 3);
 }
@@ -567,10 +663,13 @@ fn scroll_changes_zoom() {
     let mut ctrl = InteractionController::new();
 
     let original_zoom = ctrl.viewport.zoom;
-    ctrl.handle_event(InputEvent::Scroll {
-        screen: Vec2::new(400.0, 300.0),
-        delta: 1.0,
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::Scroll {
+            screen: Vec2::new(400.0, 300.0),
+            delta: 1.0,
+        },
+        &mut graph,
+    );
 
     assert!(ctrl.viewport.zoom > original_zoom);
 }
@@ -600,7 +699,10 @@ fn rect_contains_and_intersects() {
 #[test]
 fn selection_toggle() {
     let mut sel = SelectionState::new();
-    let id = crate::store::EntityId { index: 0, generation: crate::store::Generation::default() };
+    let id = crate::store::EntityId {
+        index: 0,
+        generation: crate::store::Generation::default(),
+    };
 
     sel.toggle(id);
     assert!(sel.is_selected(id));
@@ -613,21 +715,35 @@ fn layout_cache_computes_all() {
     let mut graph = make_test_graph();
 
     // Add a connection so we can test connection paths
-    let ports: Vec<_> = graph.world.query::<PortDirection>()
+    let ports: Vec<_> = graph
+        .world
+        .query::<PortDirection>()
         .map(|(id, dir)| (id, *dir))
         .collect();
-    let out = ports.iter().find(|(id, dir)| {
-        *dir == PortDirection::Output &&
-        graph.world.get::<crate::graph::port::PortOwner>(*id)
-            .map(|o| graph.world.get::<NodePosition>(o.0).unwrap().x == 0.0)
-            .unwrap_or(false)
-    }).unwrap().0;
-    let inp = ports.iter().find(|(id, dir)| {
-        *dir == PortDirection::Input &&
-        graph.world.get::<crate::graph::port::PortOwner>(*id)
-            .map(|o| graph.world.get::<NodePosition>(o.0).unwrap().x == 300.0)
-            .unwrap_or(false)
-    }).unwrap().0;
+    let out = ports
+        .iter()
+        .find(|(id, dir)| {
+            *dir == PortDirection::Output
+                && graph
+                    .world
+                    .get::<crate::graph::port::PortOwner>(*id)
+                    .map(|o| graph.world.get::<NodePosition>(o.0).unwrap().x == 0.0)
+                    .unwrap_or(false)
+        })
+        .unwrap()
+        .0;
+    let inp = ports
+        .iter()
+        .find(|(id, dir)| {
+            *dir == PortDirection::Input
+                && graph
+                    .world
+                    .get::<crate::graph::port::PortOwner>(*id)
+                    .map(|o| graph.world.get::<NodePosition>(o.0).unwrap().x == 300.0)
+                    .unwrap_or(false)
+        })
+        .unwrap()
+        .0;
     graph.connect(out, inp).unwrap();
 
     let cache = LayoutCache::compute(&graph);
@@ -673,12 +789,18 @@ fn ctrl_rmb_starts_cutting_mode() {
     let mut ctrl = InteractionController::new();
 
     let start = Vec2::new(100.0, 100.0);
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: start,
-        world: start,
-        button: MouseButton::Right,
-        modifiers: Modifiers { ctrl: true, ..Default::default() },
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: start,
+            world: start,
+            button: MouseButton::Right,
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::CuttingLinks { .. }));
 }
@@ -697,28 +819,46 @@ fn cutting_links_disconnects_intersected() {
 
     // Start cutting above the wire
     let above = Vec2::new(wire_mid.x, wire_mid.y - 50.0);
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: above,
-        world: above,
-        button: MouseButton::Right,
-        modifiers: Modifiers { ctrl: true, ..Default::default() },
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: above,
+            world: above,
+            button: MouseButton::Right,
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+        },
+        &mut graph,
+    );
 
     // Move below the wire (crossing it)
     let below = Vec2::new(wire_mid.x, wire_mid.y + 50.0);
-    ctrl.handle_event(InputEvent::MouseMove {
-        screen: below,
-        world: below,
-        modifiers: Modifiers { ctrl: true, ..Default::default() },
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseMove {
+            screen: below,
+            world: below,
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+        },
+        &mut graph,
+    );
 
     // Release
-    ctrl.handle_event(InputEvent::MouseUp {
-        screen: below,
-        world: below,
-        button: MouseButton::Right,
-        modifiers: Modifiers { ctrl: true, ..Default::default() },
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: below,
+            world: below,
+            button: MouseButton::Right,
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+        },
+        &mut graph,
+    );
 
     assert!(matches!(ctrl.state, InteractionState::Idle));
     assert_eq!(graph.connection_count(), 0);
@@ -772,15 +912,21 @@ fn drag_multiple_selected_nodes() {
     let mut graph = make_test_graph();
     let mut ctrl = InteractionController::new();
 
-    let nodes: Vec<EntityId> = graph.world.query::<crate::graph::node::NodeHeader>()
+    let nodes: Vec<EntityId> = graph
+        .world
+        .query::<crate::graph::node::NodeHeader>()
         .map(|(id, _)| id)
         .collect();
-    let node1 = nodes.iter().find(|&&id| {
-        graph.world.get::<NodePosition>(id).unwrap().x == 0.0
-    }).copied().unwrap();
-    let node2 = nodes.iter().find(|&&id| {
-        graph.world.get::<NodePosition>(id).unwrap().x == 300.0
-    }).copied().unwrap();
+    let node1 = nodes
+        .iter()
+        .find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 0.0)
+        .copied()
+        .unwrap();
+    let node2 = nodes
+        .iter()
+        .find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 300.0)
+        .copied()
+        .unwrap();
 
     // Pre-select both nodes
     ctrl.selection.select(node1);
@@ -791,27 +937,36 @@ fn drag_multiple_selected_nodes() {
 
     // Click on node1 header (already selected, so it starts dragging both)
     let click = Vec2::new(80.0, 10.0);
-    ctrl.handle_event(InputEvent::MouseDown {
-        screen: click,
-        world: click,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: click,
+            world: click,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     // Move by (25, 15)
     let moved = Vec2::new(105.0, 25.0);
-    ctrl.handle_event(InputEvent::MouseMove {
-        screen: moved,
-        world: moved,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseMove {
+            screen: moved,
+            world: moved,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
-    ctrl.handle_event(InputEvent::MouseUp {
-        screen: moved,
-        world: moved,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: moved,
+            world: moved,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     let new1 = graph.world.get::<NodePosition>(node1).unwrap();
     let new2 = graph.world.get::<NodePosition>(node2).unwrap();
@@ -825,20 +980,26 @@ fn drag_multiple_selected_nodes() {
 fn segments_intersect_basic() {
     // Crossing X
     assert!(super::segments_intersect(
-        Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0),
-        Vec2::new(0.0, 10.0), Vec2::new(10.0, 0.0),
+        Vec2::new(0.0, 0.0),
+        Vec2::new(10.0, 10.0),
+        Vec2::new(0.0, 10.0),
+        Vec2::new(10.0, 0.0),
     ));
 
     // Parallel lines
     assert!(!super::segments_intersect(
-        Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0),
-        Vec2::new(0.0, 5.0), Vec2::new(10.0, 5.0),
+        Vec2::new(0.0, 0.0),
+        Vec2::new(10.0, 0.0),
+        Vec2::new(0.0, 5.0),
+        Vec2::new(10.0, 5.0),
     ));
 
     // Non-intersecting
     assert!(!super::segments_intersect(
-        Vec2::new(0.0, 0.0), Vec2::new(5.0, 0.0),
-        Vec2::new(6.0, -1.0), Vec2::new(6.0, 1.0),
+        Vec2::new(0.0, 0.0),
+        Vec2::new(5.0, 0.0),
+        Vec2::new(6.0, -1.0),
+        Vec2::new(6.0, 1.0),
     ));
 }
 
@@ -850,8 +1011,11 @@ fn segments_intersect_basic() {
 fn hit_test_frame_detects_click_inside_frame() {
     let mut graph = make_test_graph();
     // Add a frame around all nodes
-    let nodes: Vec<EntityId> = graph.world.query::<crate::graph::node::NodeHeader>()
-        .map(|(id, _)| id).collect();
+    let nodes: Vec<EntityId> = graph
+        .world
+        .query::<crate::graph::node::NodeHeader>()
+        .map(|(id, _)| id)
+        .collect();
     graph.add_frame("Test Frame", [80, 80, 120], &nodes);
 
     let cache = LayoutCache::compute(&graph);
@@ -859,30 +1023,50 @@ fn hit_test_frame_detects_click_inside_frame() {
     // Nodes are at (0,0) and (300,50), frame extends with 30px padding
     // So frame goes from roughly (-30, -30) to (460+30, 50+height+30)
     let target = hit_test(&graph, &cache, Vec2::new(-20.0, -20.0));
-    assert!(matches!(target, HitTarget::Frame(_)), "Click in frame padding should hit frame");
+    assert!(
+        matches!(target, HitTarget::Frame(_)),
+        "Click in frame padding should hit frame"
+    );
 }
 
 #[test]
 fn hit_test_node_over_frame() {
     let mut graph = make_test_graph();
-    let nodes: Vec<EntityId> = graph.world.query::<crate::graph::node::NodeHeader>()
-        .map(|(id, _)| id).collect();
+    let nodes: Vec<EntityId> = graph
+        .world
+        .query::<crate::graph::node::NodeHeader>()
+        .map(|(id, _)| id)
+        .collect();
     graph.add_frame("Test Frame", [80, 80, 120], &nodes);
 
     let cache = LayoutCache::compute(&graph);
     // Click on the center of node 1 (at 0,0, width=160, header=28)
     let target = hit_test(&graph, &cache, Vec2::new(80.0, 14.0));
-    assert!(matches!(target, HitTarget::Node(_)), "Click on a node should hit node, not frame");
+    assert!(
+        matches!(target, HitTarget::Node(_)),
+        "Click on a node should hit node, not frame"
+    );
 }
 
 #[test]
 fn drag_frame_moves_all_member_nodes() {
     let mut graph = make_test_graph();
-    let nodes: Vec<EntityId> = graph.world.query::<crate::graph::node::NodeHeader>()
-        .map(|(id, _)| id).collect();
+    let nodes: Vec<EntityId> = graph
+        .world
+        .query::<crate::graph::node::NodeHeader>()
+        .map(|(id, _)| id)
+        .collect();
     // Frame only the first two nodes (n1 and n2)
-    let n1 = nodes.iter().find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 0.0).copied().unwrap();
-    let n2 = nodes.iter().find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 300.0).copied().unwrap();
+    let n1 = nodes
+        .iter()
+        .find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 0.0)
+        .copied()
+        .unwrap();
+    let n2 = nodes
+        .iter()
+        .find(|&&id| graph.world.get::<NodePosition>(id).unwrap().x == 300.0)
+        .copied()
+        .unwrap();
     let frame_members = vec![n1, n2];
 
     let orig_n1 = graph.world.get::<NodePosition>(n1).unwrap().clone();
@@ -895,33 +1079,69 @@ fn drag_frame_moves_all_member_nodes() {
     // Click inside frame padding (not on any node)
     // Frame spans from about (-30, -30) to (460+30, height+30)
     let click = Vec2::new(-20.0, -20.0);
-    let effects = ctrl.handle_event(InputEvent::MouseDown {
-        screen: click, world: click,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    let effects = ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: click,
+            world: click,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
-    assert!(matches!(ctrl.state, InteractionState::DraggingNodes { .. }), "Should start dragging");
-    assert!(effects.iter().any(|e| matches!(e, SideEffect::SelectionChanged)), "Should select members");
-    assert_eq!(ctrl.selection.selected.len(), 2, "Both frame member nodes should be selected");
+    assert!(
+        matches!(ctrl.state, InteractionState::DraggingNodes { .. }),
+        "Should start dragging"
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, SideEffect::SelectionChanged)),
+        "Should select members"
+    );
+    assert_eq!(
+        ctrl.selection.selected.len(),
+        2,
+        "Both frame member nodes should be selected"
+    );
 
     // Drag by (100, 50)
     let move_to = Vec2::new(80.0, 30.0);
-    ctrl.handle_event(InputEvent::MouseMove {
-        screen: move_to, world: move_to,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseMove {
+            screen: move_to,
+            world: move_to,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
-    ctrl.handle_event(InputEvent::MouseUp {
-        screen: move_to, world: move_to,
-        button: MouseButton::Left,
-        modifiers: Modifiers::default(),
-    }, &mut graph);
+    ctrl.handle_event(
+        InputEvent::MouseUp {
+            screen: move_to,
+            world: move_to,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        },
+        &mut graph,
+    );
 
     let new_n1 = graph.world.get::<NodePosition>(n1).unwrap();
     let new_n2 = graph.world.get::<NodePosition>(n2).unwrap();
-    assert!((new_n1.x - (orig_n1.x + 100.0)).abs() < 1e-10, "N1 x should move by 100");
-    assert!((new_n1.y - (orig_n1.y + 50.0)).abs() < 1e-10, "N1 y should move by 50");
-    assert!((new_n2.x - (orig_n2.x + 100.0)).abs() < 1e-10, "N2 x should move by 100");
-    assert!((new_n2.y - (orig_n2.y + 50.0)).abs() < 1e-10, "N2 y should move by 50");
+    assert!(
+        (new_n1.x - (orig_n1.x + 100.0)).abs() < 1e-10,
+        "N1 x should move by 100"
+    );
+    assert!(
+        (new_n1.y - (orig_n1.y + 50.0)).abs() < 1e-10,
+        "N1 y should move by 50"
+    );
+    assert!(
+        (new_n2.x - (orig_n2.x + 100.0)).abs() < 1e-10,
+        "N2 x should move by 100"
+    );
+    assert!(
+        (new_n2.y - (orig_n2.y + 50.0)).abs() < 1e-10,
+        "N2 y should move by 50"
+    );
 }

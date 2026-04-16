@@ -1,29 +1,38 @@
 use std::rc::Rc;
 
-use wasm_bindgen::JsCast;
-use dominator::{html, Dom, svg, clone, events, EventOptions};
+use dominator::{clone, events, html, svg, Dom, EventOptions};
 use futures_signals::signal::{Mutable, SignalExt};
+use wasm_bindgen::JsCast;
 
-use nodegraph_core::graph::frame::{FrameLabel, FrameColor};
+use nodegraph_core::graph::frame::{FrameColor, FrameLabel};
 use nodegraph_core::store::EntityId;
 
 use crate::graph_signals::GraphSignals;
 
 pub fn render_frame(frame_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     let (label, color) = gs.with_graph(|g| {
-        let label = g.world.get::<FrameLabel>(frame_id).map(|l| l.0.clone())
+        let label = g
+            .world
+            .get::<FrameLabel>(frame_id)
+            .map(|l| l.0.clone())
             .unwrap_or_default();
-        let color = g.world.get::<FrameColor>(frame_id).map(|c| c.0)
+        let color = g
+            .world
+            .get::<FrameColor>(frame_id)
+            .map(|c| c.0)
             .unwrap_or([80, 80, 120]);
         (label, color)
     });
 
     let [r, g, b] = color;
 
-    let bounds = gs.get_frame_bounds_signal(frame_id)
+    let bounds = gs
+        .get_frame_bounds_signal(frame_id)
         .unwrap_or_else(|| Mutable::new((0.0, 0.0, 200.0, 100.0)));
 
-    let is_selected = gs.selected_frames.signal_cloned()
+    let is_selected = gs
+        .selected_frames
+        .signal_cloned()
         .map(move |sel| sel.contains(&frame_id))
         .broadcast();
 

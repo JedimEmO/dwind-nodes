@@ -56,12 +56,18 @@ impl<T: Clone> ComponentStore<T> {
         self.data.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
     /// Get component at raw index (for iteration). Returns None if slot is empty.
     pub fn get_by_index(&self, index: usize) -> Option<(&Generation, &T)> {
         if index >= self.data.len() {
             return None;
         }
-        self.data[index].as_ref().map(|d| (&self.generations[index], d))
+        self.data[index]
+            .as_ref()
+            .map(|d| (&self.generations[index], d))
     }
 }
 

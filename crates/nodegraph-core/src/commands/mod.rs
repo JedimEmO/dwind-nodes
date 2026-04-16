@@ -54,22 +54,28 @@ impl UndoHistory {
         }
     }
 
-    pub fn can_undo(&self) -> bool { !self.undo_stack.is_empty() }
-    pub fn can_redo(&self) -> bool { !self.redo_stack.is_empty() }
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
 }
 
 impl Default for UndoHistory {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // Keep clipboard functions — they don't need Command types
-use crate::graph::NodeGraph;
-use crate::graph::node::NodeHeader;
-use crate::graph::port::{PortDirection, PortOwner, PortSocketType, PortLabel};
 use crate::graph::connection::ConnectionEndpoints;
+use crate::graph::node::NodeHeader;
+use crate::graph::port::{PortDirection, PortLabel, PortOwner, PortSocketType};
+use crate::graph::NodeGraph;
+use crate::serialization::{SerializedConnection, SerializedGraph, SerializedNode, SerializedPort};
 use crate::store::EntityId;
 use crate::types::socket_type::SocketType;
-use crate::serialization::{SerializedGraph, SerializedNode, SerializedPort, SerializedConnection};
 
 pub fn copy_nodes(graph: &NodeGraph, node_ids: &[EntityId]) -> SerializedGraph {
     let source_set: std::collections::HashSet<EntityId> = node_ids.iter().copied().collect();
@@ -82,19 +88,41 @@ pub fn copy_nodes(graph: &NodeGraph, node_ids: &[EntityId]) -> SerializedGraph {
             Some(h) => h.clone(),
             None => continue,
         };
-        let pos = graph.world.get::<crate::graph::node::NodePosition>(node_id)
-            .map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
+        let pos = graph
+            .world
+            .get::<crate::graph::node::NodePosition>(node_id)
+            .map(|p| (p.x, p.y))
+            .unwrap_or((0.0, 0.0));
 
         let port_ids = graph.node_ports(node_id);
         let mut ports = Vec::new();
         for &pid in port_ids {
-            let dir = graph.world.get::<PortDirection>(pid).copied().unwrap_or(PortDirection::Input);
-            let st = graph.world.get::<PortSocketType>(pid).map(|s| s.0).unwrap_or(SocketType::Float);
-            let label = graph.world.get::<PortLabel>(pid).map(|l| l.0.clone()).unwrap_or_default();
-            ports.push(SerializedPort { id: pid.index, direction: dir, socket_type: st, label });
+            let dir = graph
+                .world
+                .get::<PortDirection>(pid)
+                .copied()
+                .unwrap_or(PortDirection::Input);
+            let st = graph
+                .world
+                .get::<PortSocketType>(pid)
+                .map(|s| s.0)
+                .unwrap_or(SocketType::Float);
+            let label = graph
+                .world
+                .get::<PortLabel>(pid)
+                .map(|l| l.0.clone())
+                .unwrap_or_default();
+            ports.push(SerializedPort {
+                id: pid.index,
+                direction: dir,
+                socket_type: st,
+                label,
+            });
 
             for &conn_id in graph.port_connections(pid) {
-                if seen_connections.contains(&conn_id.index) { continue; }
+                if seen_connections.contains(&conn_id.index) {
+                    continue;
+                }
                 if let Some(ep) = graph.world.get::<ConnectionEndpoints>(conn_id) {
                     let src_owner = graph.world.get::<PortOwner>(ep.source_port).map(|o| o.0);
                     let tgt_owner = graph.world.get::<PortOwner>(ep.target_port).map(|o| o.0);
@@ -111,25 +139,49 @@ pub fn copy_nodes(graph: &NodeGraph, node_ids: &[EntityId]) -> SerializedGraph {
                 }
             }
         }
-        let is_reroute = graph.world.get::<crate::graph::reroute::IsReroute>(node_id).is_some();
-        nodes.push(SerializedNode { id: node_id.index, header, position: pos, ports, is_reroute, subgraph_id: None, group_io_kind: None });
+        let is_reroute = graph
+            .world
+            .get::<crate::graph::reroute::IsReroute>(node_id)
+            .is_some();
+        nodes.push(SerializedNode {
+            id: node_id.index,
+            header,
+            position: pos,
+            ports,
+            is_reroute,
+            subgraph_id: None,
+            group_io_kind: None,
+        });
     }
-    SerializedGraph { nodes, connections, frames: Vec::new() }
+    SerializedGraph {
+        nodes,
+        connections,
+        frames: Vec::new(),
+    }
 }
 
-pub fn paste_nodes(graph: &mut NodeGraph, data: &SerializedGraph, offset: (f64, f64)) -> Vec<EntityId> {
+pub fn paste_nodes(
+    graph: &mut NodeGraph,
+    data: &SerializedGraph,
+    offset: (f64, f64),
+) -> Vec<EntityId> {
     use std::collections::HashMap;
     let mut id_map: HashMap<u32, EntityId> = HashMap::new();
     let mut new_nodes = Vec::new();
 
     for snode in &data.nodes {
-        let node_id = graph.add_node(&snode.header.title, (snode.position.0 + offset.0, snode.position.1 + offset.1));
+        let node_id = graph.add_node(
+            &snode.header.title,
+            (snode.position.0 + offset.0, snode.position.1 + offset.1),
+        );
         if let Some(h) = graph.world.get_mut::<NodeHeader>(node_id) {
             h.color = snode.header.color;
             h.collapsed = snode.header.collapsed;
         }
         if snode.is_reroute {
-            graph.world.insert(node_id, crate::graph::reroute::IsReroute);
+            graph
+                .world
+                .insert(node_id, crate::graph::reroute::IsReroute);
         }
         id_map.insert(snode.id, node_id);
         new_nodes.push(node_id);
@@ -139,7 +191,10 @@ pub fn paste_nodes(graph: &mut NodeGraph, data: &SerializedGraph, offset: (f64, 
         }
     }
     for sconn in &data.connections {
-        if let (Some(&src), Some(&tgt)) = (id_map.get(&sconn.source_port), id_map.get(&sconn.target_port)) {
+        if let (Some(&src), Some(&tgt)) = (
+            id_map.get(&sconn.source_port),
+            id_map.get(&sconn.target_port),
+        ) {
             let _ = graph.connect(src, tgt);
         }
     }

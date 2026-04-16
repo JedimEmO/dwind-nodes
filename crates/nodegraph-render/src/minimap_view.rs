@@ -1,15 +1,15 @@
-use std::rc::Rc;
 use std::cell::Cell;
+use std::rc::Rc;
 
-use wasm_bindgen::JsCast;
-use dominator::{html, svg, Dom, clone, events};
+use dominator::{clone, events, html, svg, Dom};
+use futures_signals::map_ref;
 use futures_signals::signal::SignalExt;
 use futures_signals::signal_vec::SignalVecExt;
-use futures_signals::map_ref;
+use wasm_bindgen::JsCast;
 
 use nodegraph_core::graph::connection::ConnectionEndpoints;
 use nodegraph_core::graph::port::PortOwner;
-use nodegraph_core::layout::{NODE_MIN_WIDTH, HEADER_HEIGHT, PORT_HEIGHT};
+use nodegraph_core::layout::{HEADER_HEIGHT, NODE_MIN_WIDTH, PORT_HEIGHT};
 use nodegraph_core::store::EntityId;
 
 use crate::graph_signals::GraphSignals;
@@ -102,7 +102,7 @@ pub fn render_minimap(gs: &Rc<GraphSignals>) -> Dom {
             )
 
             // Viewport rectangle
-            .child(render_minimap_viewport(&gs))
+            .child(render_minimap_viewport(gs))
         }))
     })
 }
@@ -158,8 +158,16 @@ fn render_minimap_connection(conn_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
         Some(ep) => ep.clone(),
         None => return svg!("g", {}),
     };
-    let src_owner = graph.world.get::<PortOwner>(ep.source_port).map(|o| o.0).unwrap_or(ep.source_port);
-    let tgt_owner = graph.world.get::<PortOwner>(ep.target_port).map(|o| o.0).unwrap_or(ep.target_port);
+    let src_owner = graph
+        .world
+        .get::<PortOwner>(ep.source_port)
+        .map(|o| o.0)
+        .unwrap_or(ep.source_port);
+    let tgt_owner = graph
+        .world
+        .get::<PortOwner>(ep.target_port)
+        .map(|o| o.0)
+        .unwrap_or(ep.target_port);
     let conn_color = gs.theme.minimap_connection;
     drop(editor);
 

@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
-use dominator::{Dom, svg};
-use futures_signals::signal::{Mutable, SignalExt};
+use dominator::{svg, Dom};
 use futures_signals::map_ref;
+use futures_signals::signal::{Mutable, SignalExt};
 
 use nodegraph_core::graph::connection::ConnectionEndpoints;
-use nodegraph_core::graph::port::{PortOwner, PortSocketType, PortIndex, PortDirection};
-use nodegraph_core::layout::{self, Vec2, HEADER_HEIGHT, PORT_HEIGHT, NODE_MIN_WIDTH};
+use nodegraph_core::graph::port::{PortDirection, PortIndex, PortOwner, PortSocketType};
+use nodegraph_core::layout::{self, Vec2, HEADER_HEIGHT, NODE_MIN_WIDTH, PORT_HEIGHT};
 use nodegraph_core::store::EntityId;
 
 use crate::graph_signals::GraphSignals;
@@ -17,7 +17,10 @@ fn port_offset(graph: &nodegraph_core::graph::NodeGraph, port_id: EntityId) -> O
     let dir = *graph.world.get::<PortDirection>(port_id)?;
 
     // Reroute nodes place ports at the diamond edges, not standard layout positions
-    let is_reroute = graph.world.get::<nodegraph_core::graph::reroute::IsReroute>(owner).is_some();
+    let is_reroute = graph
+        .world
+        .get::<nodegraph_core::graph::reroute::IsReroute>(owner)
+        .is_some();
     if is_reroute {
         let size = layout::REROUTE_SIZE;
         let cx = match dir {
@@ -55,20 +58,45 @@ pub fn render_connection(conn_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
         None => return svg!("g", {}),
     };
 
-    let src_owner = graph.world.get::<PortOwner>(ep.source_port).map(|o| o.0).unwrap_or(ep.source_port);
-    let tgt_owner = graph.world.get::<PortOwner>(ep.target_port).map(|o| o.0).unwrap_or(ep.target_port);
-    let src_offset = port_offset(&graph, ep.source_port).unwrap_or(Vec2::new(0.0, 0.0));
-    let tgt_offset = port_offset(&graph, ep.target_port).unwrap_or(Vec2::new(0.0, 0.0));
+    let src_owner = graph
+        .world
+        .get::<PortOwner>(ep.source_port)
+        .map(|o| o.0)
+        .unwrap_or(ep.source_port);
+    let tgt_owner = graph
+        .world
+        .get::<PortOwner>(ep.target_port)
+        .map(|o| o.0)
+        .unwrap_or(ep.target_port);
+    let src_offset = port_offset(graph, ep.source_port).unwrap_or(Vec2::new(0.0, 0.0));
+    let tgt_offset = port_offset(graph, ep.target_port).unwrap_or(Vec2::new(0.0, 0.0));
 
-    let src_type = graph.world.get::<PortSocketType>(ep.source_port).map(|s| s.0);
-    let tgt_type = graph.world.get::<PortSocketType>(ep.target_port).map(|s| s.0);
-    let src_color = src_type.map(|t| t.default_color()).unwrap_or([170, 170, 170]);
-    let tgt_color = tgt_type.map(|t| t.default_color()).unwrap_or([170, 170, 170]);
-    let is_conversion = match (src_type, tgt_type) { (Some(s), Some(t)) => s != t, _ => false };
+    let src_type = graph
+        .world
+        .get::<PortSocketType>(ep.source_port)
+        .map(|s| s.0);
+    let tgt_type = graph
+        .world
+        .get::<PortSocketType>(ep.target_port)
+        .map(|s| s.0);
+    let src_color = src_type
+        .map(|t| t.default_color())
+        .unwrap_or([170, 170, 170]);
+    let tgt_color = tgt_type
+        .map(|t| t.default_color())
+        .unwrap_or([170, 170, 170]);
+    let is_conversion = match (src_type, tgt_type) {
+        (Some(s), Some(t)) => s != t,
+        _ => false,
+    };
     drop(editor);
 
-    let src_pos = gs.get_node_position_signal(src_owner).unwrap_or_else(|| Mutable::new((0.0, 0.0)));
-    let tgt_pos = gs.get_node_position_signal(tgt_owner).unwrap_or_else(|| Mutable::new((0.0, 0.0)));
+    let src_pos = gs
+        .get_node_position_signal(src_owner)
+        .unwrap_or_else(|| Mutable::new((0.0, 0.0)));
+    let tgt_pos = gs
+        .get_node_position_signal(tgt_owner)
+        .unwrap_or_else(|| Mutable::new((0.0, 0.0)));
 
     // Reactive bezier — recomputes when either node moves.
     // Uses SAME offset formula as SVG circle placement.
@@ -102,8 +130,12 @@ pub fn render_connection(conn_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
         let tgt_css = format!("rgb({},{},{})", tgt_color[0], tgt_color[1], tgt_color[2]);
         let stroke_url = format!("url(#{})", grad_id);
 
-        let grad_src = gs.get_node_position_signal(src_owner).unwrap_or_else(|| Mutable::new((0.0, 0.0)));
-        let grad_tgt = gs.get_node_position_signal(tgt_owner).unwrap_or_else(|| Mutable::new((0.0, 0.0)));
+        let grad_src = gs
+            .get_node_position_signal(src_owner)
+            .unwrap_or_else(|| Mutable::new((0.0, 0.0)));
+        let grad_tgt = gs
+            .get_node_position_signal(tgt_owner)
+            .unwrap_or_else(|| Mutable::new((0.0, 0.0)));
 
         svg!("g", {
             .child(svg!("defs", {

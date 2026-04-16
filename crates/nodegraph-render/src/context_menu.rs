@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use wasm_bindgen::JsCast;
-use dominator::{html, Dom, clone, events};
-use futures_signals::signal::SignalExt;
+use dominator::{clone, events, html, Dom};
 use futures_signals::map_ref;
+use futures_signals::signal::SignalExt;
+use wasm_bindgen::JsCast;
 
 use crate::graph_signals::GraphSignals;
 
@@ -54,7 +54,8 @@ pub fn render_context_menu(gs: &Rc<GraphSignals>) -> Dom {
             let (target, _, _) = menu_opt?;
             use nodegraph_core::interaction::HitTarget;
 
-            let mut items: Vec<(&str, Rc<dyn Fn()>)> = Vec::new();
+            type MenuItem<'a> = (&'a str, Rc<dyn Fn()>);
+            let mut items: Vec<MenuItem> = Vec::new();
 
             match target {
                 HitTarget::Node(node_id) => {

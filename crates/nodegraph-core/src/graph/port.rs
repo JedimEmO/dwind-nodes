@@ -1,7 +1,6 @@
-use serde::{Deserialize, Serialize};
 use crate::store::EntityId;
 use crate::types::socket_type::SocketType;
-use crate::types::value::Value;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PortOwner(pub EntityId);
@@ -20,6 +19,3 @@ pub struct PortIndex(pub u32);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PortLabel(pub String);
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PortDefaultValue(pub Value);

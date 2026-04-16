@@ -44,19 +44,35 @@ impl NodeTypeRegistry {
             return self.types.iter().collect();
         }
         let q = query.to_lowercase();
-        self.types.iter().filter(|t| {
-            t.display_name.to_lowercase().contains(&q) ||
-            t.category.to_lowercase().contains(&q)
-        }).collect()
+        self.types
+            .iter()
+            .filter(|t| {
+                t.display_name.to_lowercase().contains(&q) || t.category.to_lowercase().contains(&q)
+            })
+            .collect()
     }
 
     /// Filter to node types that have at least one port compatible with the given
     /// source (for noodle-drop-to-add). `from_output` means we need an input port.
-    pub fn search_compatible(&self, query: &str, src_type: SocketType, from_output: bool) -> Vec<&NodeTypeDefinition> {
-        self.search(query).into_iter().filter(|t| {
-            let target_ports = if from_output { &t.input_ports } else { &t.output_ports };
-            target_ports.iter().any(|p| src_type.is_compatible_with(&p.socket_type))
-        }).collect()
+    pub fn search_compatible(
+        &self,
+        query: &str,
+        src_type: SocketType,
+        from_output: bool,
+    ) -> Vec<&NodeTypeDefinition> {
+        self.search(query)
+            .into_iter()
+            .filter(|t| {
+                let target_ports = if from_output {
+                    &t.input_ports
+                } else {
+                    &t.output_ports
+                };
+                target_ports
+                    .iter()
+                    .any(|p| src_type.is_compatible_with(&p.socket_type))
+            })
+            .collect()
     }
 }
 
@@ -77,37 +93,71 @@ mod tests {
             display_name: "Math Add".into(),
             category: "Math".into(),
             input_ports: vec![
-                PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "A".into() },
-                PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "B".into() },
+                PortDefinition {
+                    direction: PortDirection::Input,
+                    socket_type: SocketType::Float,
+                    label: "A".into(),
+                },
+                PortDefinition {
+                    direction: PortDirection::Input,
+                    socket_type: SocketType::Float,
+                    label: "B".into(),
+                },
             ],
-            output_ports: vec![
-                PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Float, label: "Result".into() },
-            ],
+            output_ports: vec![PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Float,
+                label: "Result".into(),
+            }],
         });
         reg.register(NodeTypeDefinition {
             type_id: "color_mix".into(),
             display_name: "Color Mix".into(),
             category: "Color".into(),
             input_ports: vec![
-                PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Color, label: "Color 1".into() },
-                PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Color, label: "Color 2".into() },
-                PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "Factor".into() },
+                PortDefinition {
+                    direction: PortDirection::Input,
+                    socket_type: SocketType::Color,
+                    label: "Color 1".into(),
+                },
+                PortDefinition {
+                    direction: PortDirection::Input,
+                    socket_type: SocketType::Color,
+                    label: "Color 2".into(),
+                },
+                PortDefinition {
+                    direction: PortDirection::Input,
+                    socket_type: SocketType::Float,
+                    label: "Factor".into(),
+                },
             ],
-            output_ports: vec![
-                PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Color, label: "Color".into() },
-            ],
+            output_ports: vec![PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Color,
+                label: "Color".into(),
+            }],
         });
         reg.register(NodeTypeDefinition {
             type_id: "principled_bsdf".into(),
             display_name: "Principled BSDF".into(),
             category: "Shader".into(),
             input_ports: vec![
-                PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Color, label: "Base Color".into() },
-                PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "Roughness".into() },
+                PortDefinition {
+                    direction: PortDirection::Input,
+                    socket_type: SocketType::Color,
+                    label: "Base Color".into(),
+                },
+                PortDefinition {
+                    direction: PortDirection::Input,
+                    socket_type: SocketType::Float,
+                    label: "Roughness".into(),
+                },
             ],
-            output_ports: vec![
-                PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Shader, label: "BSDF".into() },
-            ],
+            output_ports: vec![PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Shader,
+                label: "BSDF".into(),
+            }],
         });
         reg
     }

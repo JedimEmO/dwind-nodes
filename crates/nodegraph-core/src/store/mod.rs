@@ -1,11 +1,11 @@
-mod entity;
-mod component;
-mod query;
 mod change;
+mod component;
+mod entity;
+mod query;
 
-pub use entity::{EntityId, Generation};
+pub use change::{ChangeRecord, ChangeTracker};
 pub use component::ComponentStore;
-pub use change::{ChangeTracker, ChangeRecord};
+pub use entity::{EntityId, Generation};
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -20,8 +20,12 @@ impl<T: Clone + 'static> CloneableStore for ComponentStore<T> {
     fn clone_store(&self) -> Box<dyn CloneableStore> {
         Box::new(self.clone())
     }
-    fn as_any(&self) -> &dyn Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
 pub struct World {
@@ -151,7 +155,9 @@ impl World {
         query::Query1::new(self)
     }
 
-    pub fn query2<A: Clone + 'static, B: Clone + 'static>(&self) -> impl Iterator<Item = (EntityId, &A, &B)> {
+    pub fn query2<A: Clone + 'static, B: Clone + 'static>(
+        &self,
+    ) -> impl Iterator<Item = (EntityId, &A, &B)> {
         query::Query2::new(self)
     }
 }
@@ -160,7 +166,9 @@ impl Clone for World {
     fn clone(&self) -> Self {
         Self {
             allocator: self.allocator.clone(),
-            components: self.components.iter()
+            components: self
+                .components
+                .iter()
                 .map(|(&k, v)| (k, v.clone_store()))
                 .collect(),
             change_tracker: self.change_tracker.clone(),

@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use wasm_bindgen::JsCast;
-use dominator::{html, Dom, clone, events, EventOptions};
-use futures_signals::signal::{Mutable, SignalExt};
+use dominator::{clone, events, html, Dom, EventOptions};
 use futures_signals::map_ref;
+use futures_signals::signal::{Mutable, SignalExt};
+use wasm_bindgen::JsCast;
 
 use crate::graph_signals::GraphSignals;
 

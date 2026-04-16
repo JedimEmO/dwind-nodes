@@ -14,12 +14,6 @@ pub struct NodePosition {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct NodeSize {
-    pub width: f64,
-    pub height: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NodeTypeId(pub String);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

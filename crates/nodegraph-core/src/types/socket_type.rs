@@ -55,7 +55,7 @@ impl SocketType {
     /// Default socket color as [r, g, b] — follows Blender's convention.
     pub fn default_color(&self) -> [u8; 3] {
         match self {
-            SocketType::Float => [160, 160, 160],    // gray
+            SocketType::Float => [160, 160, 160],     // gray
             SocketType::Int => [73, 154, 73],         // green
             SocketType::Bool => [204, 169, 136],      // tan
             SocketType::Vector => [99, 99, 199],      // purple

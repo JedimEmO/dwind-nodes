@@ -1,9 +1,8 @@
-use crate::graph::NodeGraph;
 use crate::graph::node::NodePosition;
 use crate::graph::port::PortDirection;
+use crate::graph::NodeGraph;
 use crate::layout::{
-    self, BezierPath, LayoutCache, Rect, Vec2,
-    PORT_RADIUS, compute_port_world_position,
+    self, compute_port_world_position, BezierPath, LayoutCache, Rect, Vec2, PORT_RADIUS,
 };
 use crate::store::EntityId;
 use crate::viewport::Viewport;
@@ -27,8 +26,12 @@ const CONNECTION_HIT_THRESHOLD: f64 = 8.0;
 /// Priority: ports > nodes > connections > frames.
 pub fn hit_test(_graph: &NodeGraph, cache: &LayoutCache, world_pos: Vec2) -> HitTarget {
     // Check ports first (highest priority, smallest targets)
-    for (_, layout) in &cache.layouts {
-        for &(port_id, pos) in layout.input_port_positions.iter().chain(layout.output_port_positions.iter()) {
+    for layout in cache.layouts.values() {
+        for &(port_id, pos) in layout
+            .input_port_positions
+            .iter()
+            .chain(layout.output_port_positions.iter())
+        {
             if world_pos.distance_to(pos) <= PORT_RADIUS {
                 return HitTarget::Port(port_id);
             }
@@ -153,7 +156,9 @@ pub struct SelectionState {
 
 impl SelectionState {
     pub fn new() -> Self {
-        Self { selected: Vec::new() }
+        Self {
+            selected: Vec::new(),
+        }
     }
 
     pub fn is_selected(&self, id: EntityId) -> bool {
@@ -231,11 +236,7 @@ impl InteractionController {
         }
     }
 
-    pub fn handle_event(
-        &mut self,
-        event: InputEvent,
-        graph: &mut NodeGraph,
-    ) -> Vec<SideEffect> {
+    pub fn handle_event(&mut self, event: InputEvent, graph: &mut NodeGraph) -> Vec<SideEffect> {
         let cache = LayoutCache::compute(graph);
         let mut effects = Vec::new();
 
@@ -246,11 +247,33 @@ impl InteractionController {
             InteractionState::Panning { last_screen } => {
                 self.handle_panning(event, last_screen, &mut effects);
             }
-            InteractionState::DraggingNodes { node_ids, start_positions, last_world } => {
-                self.handle_dragging(event, graph, node_ids, start_positions, last_world, &mut effects);
+            InteractionState::DraggingNodes {
+                node_ids,
+                start_positions,
+                last_world,
+            } => {
+                self.handle_dragging(
+                    event,
+                    graph,
+                    node_ids,
+                    start_positions,
+                    last_world,
+                    &mut effects,
+                );
             }
-            InteractionState::ConnectingPort { source_port, from_output, .. } => {
-                self.handle_connecting(event, graph, &cache, source_port, from_output, &mut effects);
+            InteractionState::ConnectingPort {
+                source_port,
+                from_output,
+                ..
+            } => {
+                self.handle_connecting(
+                    event,
+                    graph,
+                    &cache,
+                    source_port,
+                    from_output,
+                    &mut effects,
+                );
             }
             InteractionState::BoxSelecting { start_world, .. } => {
                 self.handle_box_selecting(event, graph, &cache, start_world, &mut effects);
@@ -271,7 +294,12 @@ impl InteractionController {
         effects: &mut Vec<SideEffect>,
     ) {
         match event {
-            InputEvent::MouseDown { world, button: MouseButton::Left, modifiers, .. } => {
+            InputEvent::MouseDown {
+                world,
+                button: MouseButton::Left,
+                modifiers,
+                ..
+            } => {
                 let target = hit_test(graph, cache, world);
                 // Deselect frames when clicking on non-frame targets
                 if !matches!(target, HitTarget::Frame(_)) {
@@ -305,7 +333,9 @@ impl InteractionController {
                         let start_positions: Vec<(f64, f64)> = node_ids
                             .iter()
                             .map(|&id| {
-                                graph.world.get::<NodePosition>(id)
+                                graph
+                                    .world
+                                    .get::<NodePosition>(id)
                                     .map(|p| (p.x, p.y))
                                     .unwrap_or((0.0, 0.0))
                             })
@@ -318,7 +348,9 @@ impl InteractionController {
                     }
                     HitTarget::Frame(frame_id) => {
                         // Select the frame and all its member nodes
-                        let members = cache.frame_rects.get(&frame_id)
+                        let members = cache
+                            .frame_rects
+                            .get(&frame_id)
                             .map(|(_, m)| m.clone())
                             .unwrap_or_default();
                         if !modifiers.shift {
@@ -334,7 +366,9 @@ impl InteractionController {
                         let start_positions: Vec<(f64, f64)> = node_ids
                             .iter()
                             .map(|&id| {
-                                graph.world.get::<NodePosition>(id)
+                                graph
+                                    .world
+                                    .get::<NodePosition>(id)
                                     .map(|p| (p.x, p.y))
                                     .unwrap_or((0.0, 0.0))
                             })
@@ -358,11 +392,24 @@ impl InteractionController {
                     _ => {}
                 }
             }
-            InputEvent::MouseDown { screen, button: MouseButton::Middle, .. } => {
-                self.state = InteractionState::Panning { last_screen: screen };
+            InputEvent::MouseDown {
+                screen,
+                button: MouseButton::Middle,
+                ..
+            } => {
+                self.state = InteractionState::Panning {
+                    last_screen: screen,
+                };
             }
-            InputEvent::MouseDown { world, button: MouseButton::Right, modifiers: Modifiers { ctrl: true, .. }, .. } => {
-                self.state = InteractionState::CuttingLinks { points: vec![world] };
+            InputEvent::MouseDown {
+                world,
+                button: MouseButton::Right,
+                modifiers: Modifiers { ctrl: true, .. },
+                ..
+            } => {
+                self.state = InteractionState::CuttingLinks {
+                    points: vec![world],
+                };
             }
             InputEvent::Scroll { screen, delta } => {
                 let factor = if delta > 0.0 { 1.1 } else { 1.0 / 1.1 };
@@ -384,9 +431,14 @@ impl InteractionController {
                 let dx = screen.x - last_screen.x;
                 let dy = screen.y - last_screen.y;
                 self.viewport.pan_by(dx, dy);
-                self.state = InteractionState::Panning { last_screen: screen };
+                self.state = InteractionState::Panning {
+                    last_screen: screen,
+                };
             }
-            InputEvent::MouseUp { button: MouseButton::Middle, .. } => {
+            InputEvent::MouseUp {
+                button: MouseButton::Middle,
+                ..
+            } => {
                 self.state = InteractionState::Idle;
             }
             _ => {}
@@ -419,7 +471,10 @@ impl InteractionController {
                     last_world: world,
                 };
             }
-            InputEvent::MouseUp { button: MouseButton::Left, .. } => {
+            InputEvent::MouseUp {
+                button: MouseButton::Left,
+                ..
+            } => {
                 effects.push(SideEffect::NodesMoved);
                 self.state = InteractionState::Idle;
             }
@@ -438,8 +493,7 @@ impl InteractionController {
     ) {
         match event {
             InputEvent::MouseMove { world, .. } => {
-                let source_pos = compute_port_world_position(graph, source_port)
-                    .unwrap_or(world);
+                let source_pos = compute_port_world_position(graph, source_port).unwrap_or(world);
                 let path = layout::compute_preview_path(source_pos, world, from_output);
                 effects.push(SideEffect::PreviewWire { path });
                 self.state = InteractionState::ConnectingPort {
@@ -448,7 +502,11 @@ impl InteractionController {
                     cursor_world: world,
                 };
             }
-            InputEvent::MouseUp { world, button: MouseButton::Left, .. } => {
+            InputEvent::MouseUp {
+                world,
+                button: MouseButton::Left,
+                ..
+            } => {
                 let target = hit_test(graph, cache, world);
                 if let HitTarget::Port(target_port) = target {
                     if target_port != source_port {
@@ -482,7 +540,12 @@ impl InteractionController {
                     current_world: world,
                 };
             }
-            InputEvent::MouseUp { world, modifiers, button: MouseButton::Left, .. } => {
+            InputEvent::MouseUp {
+                world,
+                modifiers,
+                button: MouseButton::Left,
+                ..
+            } => {
                 let rect = Rect::from_corners(start_world, world);
                 let hits = hit_test_rect(cache, rect);
                 if modifiers.shift {
@@ -513,7 +576,10 @@ impl InteractionController {
                 points.push(world);
                 self.state = InteractionState::CuttingLinks { points };
             }
-            InputEvent::MouseUp { button: MouseButton::Right, .. } => {
+            InputEvent::MouseUp {
+                button: MouseButton::Right,
+                ..
+            } => {
                 // Find all connections that intersect the cut line
                 let mut to_disconnect = Vec::new();
                 for (&conn_id, path) in &cache.connection_paths {

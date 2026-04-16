@@ -1,9 +1,9 @@
 use super::*;
-use crate::graph::GraphEditor;
 use crate::graph::node::NodePosition;
 use crate::graph::port::PortDirection;
-use crate::types::socket_type::SocketType;
+use crate::graph::GraphEditor;
 use crate::store::EntityId;
+use crate::types::socket_type::SocketType;
 
 fn make_chain(editor: &mut GraphEditor) -> (EntityId, EntityId, EntityId) {
     let g = editor.current_graph_mut();
@@ -27,20 +27,42 @@ fn undo_redo_move() {
 
     // Move
     history.save(&editor);
-    editor.current_graph_mut().world.get_mut::<NodePosition>(node).unwrap().x = 100.0;
-    editor.current_graph_mut().world.get_mut::<NodePosition>(node).unwrap().y = 50.0;
+    editor
+        .current_graph_mut()
+        .world
+        .get_mut::<NodePosition>(node)
+        .unwrap()
+        .x = 100.0;
+    editor
+        .current_graph_mut()
+        .world
+        .get_mut::<NodePosition>(node)
+        .unwrap()
+        .y = 50.0;
 
-    let pos = editor.current_graph().world.get::<NodePosition>(node).unwrap();
+    let pos = editor
+        .current_graph()
+        .world
+        .get::<NodePosition>(node)
+        .unwrap();
     assert!((pos.x - 100.0).abs() < 1e-10);
 
     // Undo
     assert!(history.undo(&mut editor));
-    let pos = editor.current_graph().world.get::<NodePosition>(node).unwrap();
+    let pos = editor
+        .current_graph()
+        .world
+        .get::<NodePosition>(node)
+        .unwrap();
     assert!((pos.x - 0.0).abs() < 1e-10);
 
     // Redo
     assert!(history.redo(&mut editor));
-    let pos = editor.current_graph().world.get::<NodePosition>(node).unwrap();
+    let pos = editor
+        .current_graph()
+        .world
+        .get::<NodePosition>(node)
+        .unwrap();
     assert!((pos.x - 100.0).abs() < 1e-10);
 }
 
@@ -72,17 +94,32 @@ fn redo_stack_clears_on_new_action() {
     let node = editor.current_graph_mut().add_node("N", (0.0, 0.0));
 
     history.save(&editor);
-    editor.current_graph_mut().world.get_mut::<NodePosition>(node).unwrap().x = 10.0;
+    editor
+        .current_graph_mut()
+        .world
+        .get_mut::<NodePosition>(node)
+        .unwrap()
+        .x = 10.0;
 
     history.save(&editor);
-    editor.current_graph_mut().world.get_mut::<NodePosition>(node).unwrap().x = 20.0;
+    editor
+        .current_graph_mut()
+        .world
+        .get_mut::<NodePosition>(node)
+        .unwrap()
+        .x = 20.0;
 
     history.undo(&mut editor);
     assert!(history.can_redo());
 
     // New action clears redo
     history.save(&editor);
-    editor.current_graph_mut().world.get_mut::<NodePosition>(node).unwrap().x = 5.0;
+    editor
+        .current_graph_mut()
+        .world
+        .get_mut::<NodePosition>(node)
+        .unwrap()
+        .x = 5.0;
     assert!(!history.can_redo());
 }
 
@@ -109,7 +146,11 @@ fn undo_group() {
     // Redo
     history.redo(&mut editor);
     assert_eq!(editor.current_graph().node_count(), 3); // A, C, Group
-    let has_group = editor.current_graph().world.query::<crate::graph::group::SubgraphRoot>().count();
+    let has_group = editor
+        .current_graph()
+        .world
+        .query::<crate::graph::group::SubgraphRoot>()
+        .count();
     assert_eq!(has_group, 1);
 
     // Undo again
@@ -145,9 +186,13 @@ fn undo_ungroup() {
     let (_n1, n2, _n3) = make_chain(&mut editor);
 
     editor.group_nodes(&[n2]);
-    let group_node = editor.current_graph().world
+    let group_node = editor
+        .current_graph()
+        .world
         .query::<crate::graph::group::SubgraphRoot>()
-        .map(|(id, _)| id).next().unwrap();
+        .map(|(id, _)| id)
+        .next()
+        .unwrap();
 
     history.save(&editor);
     editor.ungroup(group_node);
@@ -155,7 +200,11 @@ fn undo_ungroup() {
 
     history.undo(&mut editor);
     assert_eq!(editor.current_graph().node_count(), 3); // A, C, Group
-    let has_group = editor.current_graph().world.query::<crate::graph::group::SubgraphRoot>().count();
+    let has_group = editor
+        .current_graph()
+        .world
+        .query::<crate::graph::group::SubgraphRoot>()
+        .count();
     assert_eq!(has_group, 1);
 }
 

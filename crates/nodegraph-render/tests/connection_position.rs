@@ -3,13 +3,13 @@ use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
-use nodegraph_core::graph::node::{NodePosition, MuteState};
-use nodegraph_core::graph::port::PortDirection;
 use nodegraph_core::graph::connection::ConnectionEndpoints;
-use nodegraph_core::interaction::{InputEvent, MouseButton, Modifiers};
+use nodegraph_core::graph::node::{MuteState, NodePosition};
+use nodegraph_core::graph::port::PortDirection;
+use nodegraph_core::interaction::{InputEvent, Modifiers, MouseButton};
 use nodegraph_core::layout::Vec2;
+use nodegraph_core::search::{NodeTypeDefinition, PortDefinition};
 use nodegraph_core::store::EntityId;
-use nodegraph_core::search::{NodeTypeDefinition, PortDefinition, NodeTypeRegistry};
 use nodegraph_core::types::socket_type::SocketType;
 use nodegraph_render::graph_signals::GraphSignals;
 use nodegraph_render::viewport_view::render_graph_editor;
@@ -18,17 +18,25 @@ use nodegraph_render::viewport_view::render_graph_editor;
 // Helpers
 // ============================================================
 
-fn new_two_node_graph() -> (std::rc::Rc<GraphSignals>, EntityId, EntityId, EntityId, EntityId) {
+fn new_two_node_graph() -> (
+    std::rc::Rc<GraphSignals>,
+    EntityId,
+    EntityId,
+    EntityId,
+    EntityId,
+) {
     let gs = GraphSignals::new();
-    let (n1, _) = gs.add_node("Source", (100.0, 100.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n2, _) = gs.add_node("Target", (400.0, 100.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
-    let (out, inp) = gs.with_graph(|graph| {
-        (graph.node_ports(n1)[0], graph.node_ports(n2)[0])
-    });
+    let (n1, _) = gs.add_node(
+        "Source",
+        (100.0, 100.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (n2, _) = gs.add_node(
+        "Target",
+        (400.0, 100.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
+    let (out, inp) = gs.with_graph(|graph| (graph.node_ports(n1)[0], graph.node_ports(n2)[0]));
     (gs, n1, n2, out, inp)
 }
 
@@ -41,7 +49,11 @@ impl TestContainer {
     fn new() -> Self {
         let doc = web_sys::window().unwrap().document().unwrap();
         let el = doc.create_element("div").unwrap();
-        el.set_attribute("style", "position:absolute;left:0;top:0;width:800px;height:600px").unwrap();
+        el.set_attribute(
+            "style",
+            "position:absolute;left:0;top:0;width:800px;height:600px",
+        )
+        .unwrap();
         doc.body().unwrap().append_child(&el).unwrap();
         Self { element: el }
     }
@@ -89,11 +101,23 @@ fn test_port_world_pos_from_graph_state() {
     let inp_pos = gs.port_world_pos(inp).unwrap();
 
     // Output port on Source (at 100,100): right edge of node
-    assert!(out_pos.x > 200.0, "Output port x={} should be at right edge", out_pos.x);
-    assert!(out_pos.y > 100.0, "Output port y={} should be below header", out_pos.y);
+    assert!(
+        out_pos.x > 200.0,
+        "Output port x={} should be at right edge",
+        out_pos.x
+    );
+    assert!(
+        out_pos.y > 100.0,
+        "Output port y={} should be below header",
+        out_pos.y
+    );
 
     // Input port on Target (at 400,100): left edge of node
-    assert!(inp_pos.x > 399.0 && inp_pos.x < 401.0, "Input port x={} should be at left edge", inp_pos.x);
+    assert!(
+        inp_pos.x > 399.0 && inp_pos.x < 401.0,
+        "Input port x={} should be at left edge",
+        inp_pos.x
+    );
 }
 
 #[wasm_bindgen_test]
@@ -104,15 +128,24 @@ fn test_port_world_pos_reasonable() {
 
     // Output port on Source (at x=100): should be near right edge of node
     let out_pos = gs.port_world_pos(out).unwrap();
-    assert!(out_pos.x > 200.0 && out_pos.x < 300.0,
-        "Output port x={} should be near right edge of Source node (x=100, w=160)", out_pos.x);
-    assert!(out_pos.y > 100.0 && out_pos.y < 200.0,
-        "Output port y={} should be below header of Source node (y=100)", out_pos.y);
+    assert!(
+        out_pos.x > 200.0 && out_pos.x < 300.0,
+        "Output port x={} should be near right edge of Source node (x=100, w=160)",
+        out_pos.x
+    );
+    assert!(
+        out_pos.y > 100.0 && out_pos.y < 200.0,
+        "Output port y={} should be below header of Source node (y=100)",
+        out_pos.y
+    );
 
     // Input port on Target (at x=400): should be near left edge
     let inp_pos = gs.port_world_pos(inp).unwrap();
-    assert!(inp_pos.x >= 400.0 && inp_pos.x < 420.0,
-        "Input port x={} should be at left edge of Target node (x=400)", inp_pos.x);
+    assert!(
+        inp_pos.x >= 400.0 && inp_pos.x < 420.0,
+        "Input port x={} should be at left edge of Target node (x=400)",
+        inp_pos.x
+    );
 }
 
 #[wasm_bindgen_test]
@@ -129,14 +162,28 @@ fn test_connection_endpoints_computable() {
     let path = nodegraph_core::layout::compute_connection_path(out_pos, inp_pos);
     let d = path.to_svg_d();
     assert!(d.starts_with("M "), "Path should start with M, got: {}", d);
-    assert!(d.contains(" C "), "Path should contain C bezier, got: {}", d);
+    assert!(
+        d.contains(" C "),
+        "Path should contain C bezier, got: {}",
+        d
+    );
 
     // Start point should match output port position
     let parts: Vec<&str> = d.split_whitespace().collect();
     let px: f64 = parts[1].parse().unwrap();
     let py: f64 = parts[2].parse().unwrap();
-    assert!((px - out_pos.x).abs() < 0.01, "Path start x={} should match port x={}", px, out_pos.x);
-    assert!((py - out_pos.y).abs() < 0.01, "Path start y={} should match port y={}", py, out_pos.y);
+    assert!(
+        (px - out_pos.x).abs() < 0.01,
+        "Path start x={} should match port x={}",
+        px,
+        out_pos.x
+    );
+    assert!(
+        (py - out_pos.y).abs() < 0.01,
+        "Path start y={} should match port y={}",
+        py,
+        out_pos.y
+    );
 }
 
 // ============================================================
@@ -153,15 +200,24 @@ fn test_drag_updates_connection_reactively() {
     let pos_before = gs.port_world_pos(out).unwrap();
 
     // Move node 1 by updating position signal (simulates what sync_all_positions does)
-    gs.node_positions.borrow().get(&n1).unwrap().set((200.0, 200.0));
+    gs.node_positions
+        .borrow()
+        .get(&n1)
+        .unwrap()
+        .set((200.0, 200.0));
     // Also update the graph state to match
     gs.with_graph_mut(|g| g.world.get_mut::<NodePosition>(n1).unwrap().x = 200.0);
     gs.with_graph_mut(|g| g.world.get_mut::<NodePosition>(n1).unwrap().y = 200.0);
     // Port world pos should now reflect the new node position (synchronous — no frames needed)
     let pos_after = gs.port_world_pos(out).unwrap();
-    assert!((pos_after.x - pos_before.x).abs() > 50.0,
+    assert!(
+        (pos_after.x - pos_before.x).abs() > 50.0,
         "Port position should have changed. Before: ({},{}), After: ({},{})",
-        pos_before.x, pos_before.y, pos_after.x, pos_after.y);
+        pos_before.x,
+        pos_before.y,
+        pos_after.x,
+        pos_after.y
+    );
 }
 
 // ============================================================
@@ -216,10 +272,10 @@ fn test_mute_toggle() {
 
     gs.select_single(n1);
     gs.toggle_mute_selected();
-    assert_eq!(gs.with_graph(|g| g.world.get::<MuteState>(n1).map(|m| m.0).unwrap()), true);
+    assert!(gs.with_graph(|g| g.world.get::<MuteState>(n1).map(|m| m.0).unwrap()));
 
     gs.toggle_mute_selected(); // selection still set from above
-    assert_eq!(gs.with_graph(|g| g.world.get::<MuteState>(n1).map(|m| m.0).unwrap()), false);
+    assert!(!gs.with_graph(|g| g.world.get::<MuteState>(n1).map(|m| m.0).unwrap()));
 }
 
 #[wasm_bindgen_test]
@@ -250,12 +306,16 @@ fn test_compatible_connection_succeeds() {
 #[wasm_bindgen_test]
 fn test_incompatible_connection_rejected() {
     let gs = GraphSignals::new();
-    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Shader, "Out".to_string()),
-    ]);
-    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Geometry, "In".to_string()),
-    ]);
+    let (n1, _) = gs.add_node(
+        "A",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Shader, "Out".to_string())],
+    );
+    let (n2, _) = gs.add_node(
+        "B",
+        (200.0, 0.0),
+        vec![(PortDirection::Input, SocketType::Geometry, "In".to_string())],
+    );
     let (out, inp) = gs.with_graph(|g| (g.node_ports(n1)[0], g.node_ports(n2)[0]));
     let _tc = render_sync(&gs);
 
@@ -291,16 +351,21 @@ fn test_pan() {
     let _tc = render_sync(&gs);
 
     gs.handle_input(InputEvent::MouseDown {
-        screen: Vec2::new(400.0, 300.0), world: Vec2::new(400.0, 300.0),
-        button: MouseButton::Middle, modifiers: Modifiers::default(),
+        screen: Vec2::new(400.0, 300.0),
+        world: Vec2::new(400.0, 300.0),
+        button: MouseButton::Middle,
+        modifiers: Modifiers::default(),
     });
     gs.handle_input(InputEvent::MouseMove {
-        screen: Vec2::new(450.0, 320.0), world: Vec2::new(450.0, 320.0),
+        screen: Vec2::new(450.0, 320.0),
+        world: Vec2::new(450.0, 320.0),
         modifiers: Modifiers::default(),
     });
     gs.handle_input(InputEvent::MouseUp {
-        screen: Vec2::new(450.0, 320.0), world: Vec2::new(450.0, 320.0),
-        button: MouseButton::Middle, modifiers: Modifiers::default(),
+        screen: Vec2::new(450.0, 320.0),
+        world: Vec2::new(450.0, 320.0),
+        button: MouseButton::Middle,
+        modifiers: Modifiers::default(),
     });
 
     let (px, py) = gs.pan.get();
@@ -314,7 +379,10 @@ fn test_zoom() {
     let _tc = render_sync(&gs);
 
     let z0 = gs.zoom.get();
-    gs.handle_input(InputEvent::Scroll { screen: Vec2::new(400.0, 300.0), delta: 100.0 });
+    gs.handle_input(InputEvent::Scroll {
+        screen: Vec2::new(400.0, 300.0),
+        delta: 100.0,
+    });
     assert!(gs.zoom.get() > z0);
 }
 
@@ -369,38 +437,68 @@ fn test_full_drag_to_connect_cycle() {
     // Move toward target — preview wire should appear
     let mid = Vec2::new(250.0, 100.0);
     gs.handle_input(InputEvent::MouseMove {
-        screen: mid, world: mid, modifiers: Modifiers::default(),
+        screen: mid,
+        world: mid,
+        modifiers: Modifiers::default(),
     });
-    assert!(gs.preview_wire.get_cloned().is_some(), "Preview wire should be visible during drag");
+    assert!(
+        gs.preview_wire.get_cloned().is_some(),
+        "Preview wire should be visible during drag"
+    );
 
     // Move over target port — drop target should activate
     let inp_pos = gs.port_world_pos(inp).unwrap();
     gs.handle_input(InputEvent::MouseMove {
-        screen: inp_pos, world: inp_pos, modifiers: Modifiers::default(),
+        screen: inp_pos,
+        world: inp_pos,
+        modifiers: Modifiers::default(),
     });
-    assert_eq!(gs.drop_target_port.get(), Some(inp), "Drop target should be the input port");
+    assert_eq!(
+        gs.drop_target_port.get(),
+        Some(inp),
+        "Drop target should be the input port"
+    );
 
     // Release — connection should be created
     gs.handle_input(InputEvent::MouseUp {
-        screen: inp_pos, world: inp_pos,
-        button: MouseButton::Left, modifiers: Modifiers::default(),
+        screen: inp_pos,
+        world: inp_pos,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
     });
 
-    assert_eq!(gs.connection_count(), 1, "Connection should be created after drop");
-    assert!(gs.connecting_from.get().is_none(), "connecting_from should be cleared");
-    assert!(gs.preview_wire.get_cloned().is_none(), "Preview wire should be cleared");
-    assert!(gs.drop_target_port.get().is_none(), "Drop target should be cleared");
+    assert_eq!(
+        gs.connection_count(),
+        1,
+        "Connection should be created after drop"
+    );
+    assert!(
+        gs.connecting_from.get().is_none(),
+        "connecting_from should be cleared"
+    );
+    assert!(
+        gs.preview_wire.get_cloned().is_none(),
+        "Preview wire should be cleared"
+    );
+    assert!(
+        gs.drop_target_port.get().is_none(),
+        "Drop target should be cleared"
+    );
 }
 
 #[wasm_bindgen_test]
 fn test_drag_to_connect_incompatible_rejected() {
     let gs = GraphSignals::new();
-    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Shader, "Out".to_string()),
-    ]);
-    let (n2, _) = gs.add_node("B", (300.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Geometry, "In".to_string()),
-    ]);
+    let (n1, _) = gs.add_node(
+        "A",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Shader, "Out".to_string())],
+    );
+    let (n2, _) = gs.add_node(
+        "B",
+        (300.0, 0.0),
+        vec![(PortDirection::Input, SocketType::Geometry, "In".to_string())],
+    );
     let (out, inp) = gs.with_graph(|g| (g.node_ports(n1)[0], g.node_ports(n2)[0]));
     let _tc = render_sync(&gs);
 
@@ -410,14 +508,22 @@ fn test_drag_to_connect_incompatible_rejected() {
     // Move over incompatible target — drop target should NOT activate
     let inp_pos = gs.port_world_pos(inp).unwrap();
     gs.handle_input(InputEvent::MouseMove {
-        screen: inp_pos, world: inp_pos, modifiers: Modifiers::default(),
+        screen: inp_pos,
+        world: inp_pos,
+        modifiers: Modifiers::default(),
     });
-    assert_eq!(gs.drop_target_port.get(), None, "Incompatible port should not be drop target");
+    assert_eq!(
+        gs.drop_target_port.get(),
+        None,
+        "Incompatible port should not be drop target"
+    );
 
     // Release — no connection
     gs.handle_input(InputEvent::MouseUp {
-        screen: inp_pos, world: inp_pos,
-        button: MouseButton::Left, modifiers: Modifiers::default(),
+        screen: inp_pos,
+        world: inp_pos,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
     });
     assert_eq!(gs.connection_count(), 0);
 }
@@ -433,8 +539,10 @@ fn test_drag_to_connect_release_on_empty() {
     // Release far from any port
     let far = Vec2::new(999.0, 999.0);
     gs.handle_input(InputEvent::MouseUp {
-        screen: far, world: far,
-        button: MouseButton::Left, modifiers: Modifiers::default(),
+        screen: far,
+        world: far,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
     });
 
     assert_eq!(gs.connection_count(), 0);
@@ -454,17 +562,29 @@ fn test_port_position_changes_after_node_move() {
     let pos_before = gs.port_world_pos(out).unwrap();
 
     // Move the source node via position signal (same as sync_all_positions does)
-    gs.node_positions.borrow().get(&n1).unwrap().set((300.0, 300.0));
+    gs.node_positions
+        .borrow()
+        .get(&n1)
+        .unwrap()
+        .set((300.0, 300.0));
     gs.with_graph_mut(|g| g.world.get_mut::<NodePosition>(n1).unwrap().x = 300.0);
     gs.with_graph_mut(|g| g.world.get_mut::<NodePosition>(n1).unwrap().y = 300.0);
 
     let pos_after = gs.port_world_pos(out).unwrap();
 
     // Port world position should have moved by the same delta as the node
-    assert!((pos_after.x - pos_before.x - 200.0).abs() < 1.0,
-        "Port x should move by 200. Before: {}, After: {}", pos_before.x, pos_after.x);
-    assert!((pos_after.y - pos_before.y - 200.0).abs() < 1.0,
-        "Port y should move by 200. Before: {}, After: {}", pos_before.y, pos_after.y);
+    assert!(
+        (pos_after.x - pos_before.x - 200.0).abs() < 1.0,
+        "Port x should move by 200. Before: {}, After: {}",
+        pos_before.x,
+        pos_after.x
+    );
+    assert!(
+        (pos_after.y - pos_before.y - 200.0).abs() < 1.0,
+        "Port y should move by 200. Before: {}, After: {}",
+        pos_before.y,
+        pos_after.y
+    );
 }
 
 // ============================================================
@@ -486,8 +606,11 @@ fn test_connection_svg_removed_after_delete() {
     gs.delete_selected();
 
     // Connection list should be empty
-    assert_eq!(gs.connection_list.lock_ref().len(), 0,
-        "connection_list should be empty after deleting connected node");
+    assert_eq!(
+        gs.connection_list.lock_ref().len(),
+        0,
+        "connection_list should be empty after deleting connected node"
+    );
 }
 
 // ============================================================
@@ -509,24 +632,39 @@ fn test_preview_wire_lifecycle() {
     // Move — preview should appear
     let mid = Vec2::new(250.0, 150.0);
     gs.handle_input(InputEvent::MouseMove {
-        screen: mid, world: mid, modifiers: Modifiers::default(),
+        screen: mid,
+        world: mid,
+        modifiers: Modifiers::default(),
     });
     let wire = gs.preview_wire.get_cloned();
     assert!(wire.is_some(), "Preview wire should exist during drag");
 
     // Check the preview wire starts near the output port
     let wire = wire.unwrap();
-    assert!((wire.start.x - out_pos.x).abs() < 5.0,
-        "Preview wire start x={} should be near port x={}", wire.start.x, out_pos.x);
-    assert!((wire.start.y - out_pos.y).abs() < 5.0,
-        "Preview wire start y={} should be near port y={}", wire.start.y, out_pos.y);
+    assert!(
+        (wire.start.x - out_pos.x).abs() < 5.0,
+        "Preview wire start x={} should be near port x={}",
+        wire.start.x,
+        out_pos.x
+    );
+    assert!(
+        (wire.start.y - out_pos.y).abs() < 5.0,
+        "Preview wire start y={} should be near port y={}",
+        wire.start.y,
+        out_pos.y
+    );
 
     // Release — preview should disappear
     gs.handle_input(InputEvent::MouseUp {
-        screen: mid, world: mid,
-        button: MouseButton::Left, modifiers: Modifiers::default(),
+        screen: mid,
+        world: mid,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
     });
-    assert!(gs.preview_wire.get_cloned().is_none(), "Preview wire should be cleared after release");
+    assert!(
+        gs.preview_wire.get_cloned().is_none(),
+        "Preview wire should be cleared after release"
+    );
 }
 
 // ============================================================
@@ -555,11 +693,18 @@ fn test_undo_redo_with_connections() {
     assert_eq!(gs.connection_count(), 1);
 
     // Connection path should be valid after undo (offsets computed from data, no rAF needed)
-    let _conn_id = gs.with_graph(|g| g.world.query::<ConnectionEndpoints>()
-        .map(|(id, _)| id).next().unwrap());
+    let _conn_id = gs.with_graph(|g| {
+        g.world
+            .query::<ConnectionEndpoints>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
+    });
     // The connection_list should be repopulated
-    assert!(gs.connection_list.lock_ref().len() >= 1,
-        "connection_list should have the restored connection");
+    assert!(
+        !gs.connection_list.lock_ref().is_empty(),
+        "connection_list should have the restored connection"
+    );
 }
 
 // ============================================================
@@ -574,31 +719,48 @@ fn test_box_selection_selects_contained_nodes() {
     // Start box select on empty space
     let start = Vec2::new(50.0, 50.0);
     gs.handle_input(InputEvent::MouseDown {
-        screen: start, world: start,
-        button: MouseButton::Left, modifiers: Modifiers::default(),
+        screen: start,
+        world: start,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
     });
 
     // Drag to cover both nodes (n1 at 100,100 and n2 at 400,100)
     let end = Vec2::new(600.0, 300.0);
     gs.handle_input(InputEvent::MouseMove {
-        screen: end, world: end, modifiers: Modifiers::default(),
+        screen: end,
+        world: end,
+        modifiers: Modifiers::default(),
     });
 
     // Box select rect should be visible
-    assert!(gs.box_select_rect.get_cloned().is_some(), "Box select rect should be visible during drag");
+    assert!(
+        gs.box_select_rect.get_cloned().is_some(),
+        "Box select rect should be visible during drag"
+    );
 
     // Release
     gs.handle_input(InputEvent::MouseUp {
-        screen: end, world: end,
-        button: MouseButton::Left, modifiers: Modifiers::default(),
+        screen: end,
+        world: end,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
     });
 
     // Both nodes should be selected
     let sel = gs.selection.get_cloned();
-    assert_eq!(sel.len(), 2, "Both nodes should be selected, got {}", sel.len());
+    assert_eq!(
+        sel.len(),
+        2,
+        "Both nodes should be selected, got {}",
+        sel.len()
+    );
 
     // Box select rect should be cleared
-    assert!(gs.box_select_rect.get_cloned().is_none(), "Box select rect should be cleared after release");
+    assert!(
+        gs.box_select_rect.get_cloned().is_none(),
+        "Box select rect should be cleared after release"
+    );
 }
 
 // ============================================================
@@ -622,31 +784,56 @@ fn test_cut_links() {
     // Start Ctrl+RMB cut above the wire
     let above = Vec2::new(mid_x, mid_y - 50.0);
     gs.handle_input(InputEvent::MouseDown {
-        screen: above, world: above,
+        screen: above,
+        world: above,
         button: MouseButton::Right,
-        modifiers: Modifiers { ctrl: true, shift: false, alt: false },
+        modifiers: Modifiers {
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
     });
 
     // Cut line should be visible
-    assert!(!gs.cut_line_points.get_cloned().is_empty(), "Cut line should have points during drag");
+    assert!(
+        !gs.cut_line_points.get_cloned().is_empty(),
+        "Cut line should have points during drag"
+    );
 
     // Drag below the wire
     let below = Vec2::new(mid_x, mid_y + 50.0);
     gs.handle_input(InputEvent::MouseMove {
-        screen: below, world: below,
-        modifiers: Modifiers { ctrl: true, shift: false, alt: false },
+        screen: below,
+        world: below,
+        modifiers: Modifiers {
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
     });
 
     // Release
     gs.handle_input(InputEvent::MouseUp {
-        screen: below, world: below,
+        screen: below,
+        world: below,
         button: MouseButton::Right,
-        modifiers: Modifiers { ctrl: true, shift: false, alt: false },
+        modifiers: Modifiers {
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
     });
 
     // Connection should be cut
-    assert_eq!(gs.connection_count(), 0, "Connection should be removed by cut");
-    assert!(gs.cut_line_points.get_cloned().is_empty(), "Cut line should be cleared");
+    assert_eq!(
+        gs.connection_count(),
+        0,
+        "Connection should be removed by cut"
+    );
+    assert!(
+        gs.cut_line_points.get_cloned().is_empty(),
+        "Cut line should be cleared"
+    );
 }
 
 // ============================================================
@@ -656,16 +843,28 @@ fn test_cut_links() {
 #[wasm_bindgen_test]
 fn test_multiple_connections_from_output() {
     let gs = GraphSignals::new();
-    let (mc_n1, _) = gs.add_node("Src", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (mc_n2, _) = gs.add_node("Tgt1", (200.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
-    let (mc_n3, _) = gs.add_node("Tgt2", (200.0, 100.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
-    let (out, in1, in2) = gs.with_graph(|g| (g.node_ports(mc_n1)[0], g.node_ports(mc_n2)[0], g.node_ports(mc_n3)[0]));
+    let (mc_n1, _) = gs.add_node(
+        "Src",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (mc_n2, _) = gs.add_node(
+        "Tgt1",
+        (200.0, 0.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
+    let (mc_n3, _) = gs.add_node(
+        "Tgt2",
+        (200.0, 100.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
+    let (out, in1, in2) = gs.with_graph(|g| {
+        (
+            g.node_ports(mc_n1)[0],
+            g.node_ports(mc_n2)[0],
+            g.node_ports(mc_n3)[0],
+        )
+    });
 
     let _tc = render_sync(&gs);
 
@@ -683,16 +882,28 @@ fn test_multiple_connections_from_output() {
 #[wasm_bindgen_test]
 fn test_replacing_input_connection() {
     let gs = GraphSignals::new();
-    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n2, _) = gs.add_node("B", (0.0, 100.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n3, _) = gs.add_node("C", (200.0, 50.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
-    let (out1, out2, inp) = gs.with_graph(|g| (g.node_ports(n1)[0], g.node_ports(n2)[0], g.node_ports(n3)[0]));
+    let (n1, _) = gs.add_node(
+        "A",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (n2, _) = gs.add_node(
+        "B",
+        (0.0, 100.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (n3, _) = gs.add_node(
+        "C",
+        (200.0, 50.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
+    let (out1, out2, inp) = gs.with_graph(|g| {
+        (
+            g.node_ports(n1)[0],
+            g.node_ports(n2)[0],
+            g.node_ports(n3)[0],
+        )
+    });
 
     let _tc = render_sync(&gs);
 
@@ -701,7 +912,11 @@ fn test_replacing_input_connection() {
 
     // Connecting out2 to the same input should replace
     gs.connect_ports(out2, inp).unwrap();
-    assert_eq!(gs.connection_count(), 1, "Old connection should be replaced");
+    assert_eq!(
+        gs.connection_count(),
+        1,
+        "Old connection should be replaced"
+    );
 }
 
 // ============================================================
@@ -711,19 +926,29 @@ fn test_replacing_input_connection() {
 fn register_test_types(gs: &std::rc::Rc<GraphSignals>) {
     let mut reg = gs.registry.borrow_mut();
     reg.register(NodeTypeDefinition {
-        type_id: "math_add".into(), display_name: "Math Add".into(), category: "Math".into(),
-        input_ports: vec![
-            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "A".into() },
-        ],
-        output_ports: vec![
-            PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Float, label: "Result".into() },
-        ],
+        type_id: "math_add".into(),
+        display_name: "Math Add".into(),
+        category: "Math".into(),
+        input_ports: vec![PortDefinition {
+            direction: PortDirection::Input,
+            socket_type: SocketType::Float,
+            label: "A".into(),
+        }],
+        output_ports: vec![PortDefinition {
+            direction: PortDirection::Output,
+            socket_type: SocketType::Float,
+            label: "Result".into(),
+        }],
     });
     reg.register(NodeTypeDefinition {
-        type_id: "shader_out".into(), display_name: "Shader Output".into(), category: "Shader".into(),
-        input_ports: vec![
-            PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Shader, label: "Surface".into() },
-        ],
+        type_id: "shader_out".into(),
+        display_name: "Shader Output".into(),
+        category: "Shader".into(),
+        input_ports: vec![PortDefinition {
+            direction: PortDirection::Input,
+            socket_type: SocketType::Shader,
+            label: "Surface".into(),
+        }],
         output_ports: vec![],
     });
 }
@@ -761,7 +986,10 @@ fn test_spawn_from_registry() {
     gs.spawn_from_registry("math_add", (300.0, 300.0));
 
     assert_eq!(gs.node_count(), 3);
-    assert!(gs.search_menu.get().is_none(), "Menu should close after spawn");
+    assert!(
+        gs.search_menu.get().is_none(),
+        "Menu should close after spawn"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -777,13 +1005,21 @@ fn test_noodle_drop_opens_search_with_pending() {
     // Release on empty canvas
     let far = Vec2::new(500.0, 500.0);
     gs.handle_input(InputEvent::MouseUp {
-        screen: far, world: far,
-        button: MouseButton::Left, modifiers: Modifiers::default(),
+        screen: far,
+        world: far,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
     });
 
     // Search menu should be open with pending connection
-    assert!(gs.search_menu.get().is_some(), "Search menu should open on noodle drop");
-    assert!(gs.pending_connection.get().is_some(), "Pending connection should be set");
+    assert!(
+        gs.search_menu.get().is_some(),
+        "Search menu should open on noodle drop"
+    );
+    assert!(
+        gs.pending_connection.get().is_some(),
+        "Pending connection should be set"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -797,7 +1033,11 @@ fn test_spawn_from_registry_auto_connects() {
     // Simulate noodle drop → pending connection
     let cf = gs.with_graph(|g| {
         let dir = g.world.get::<PortDirection>(out).copied().unwrap();
-        let st = g.world.get::<nodegraph_core::graph::port::PortSocketType>(out).map(|s| s.0).unwrap();
+        let st = g
+            .world
+            .get::<nodegraph_core::graph::port::PortSocketType>(out)
+            .map(|s| s.0)
+            .unwrap();
         let from_output = dir == PortDirection::Output;
         (out, st, from_output)
     });
@@ -808,7 +1048,11 @@ fn test_spawn_from_registry_auto_connects() {
     gs.spawn_from_registry("math_add", (300.0, 300.0));
 
     assert_eq!(gs.node_count(), 3);
-    assert_eq!(gs.connection_count(), 1, "Should auto-connect to spawned node");
+    assert_eq!(
+        gs.connection_count(),
+        1,
+        "Should auto-connect to spawned node"
+    );
     assert!(gs.pending_connection.get().is_none());
     assert!(gs.search_menu.get().is_none());
 }
@@ -821,7 +1065,11 @@ fn test_spawn_incompatible_no_auto_connect() {
 
     // Pending from Float output
     let cf = gs.with_graph(|g| {
-        let st = g.world.get::<nodegraph_core::graph::port::PortSocketType>(out).map(|s| s.0).unwrap();
+        let st = g
+            .world
+            .get::<nodegraph_core::graph::port::PortSocketType>(out)
+            .map(|s| s.0)
+            .unwrap();
         (out, st, true)
     });
     gs.pending_connection.set(Some(cf));
@@ -830,7 +1078,11 @@ fn test_spawn_incompatible_no_auto_connect() {
     gs.spawn_from_registry("shader_out", (300.0, 300.0));
 
     assert_eq!(gs.node_count(), 3);
-    assert_eq!(gs.connection_count(), 0, "Should NOT auto-connect to incompatible node");
+    assert_eq!(
+        gs.connection_count(),
+        0,
+        "Should NOT auto-connect to incompatible node"
+    );
 }
 
 // ============================================================
@@ -839,23 +1091,39 @@ fn test_spawn_incompatible_no_auto_connect() {
 
 fn setup_three_node_chain() -> (std::rc::Rc<GraphSignals>, EntityId, EntityId, EntityId) {
     let gs = GraphSignals::new();
-    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n3, _) = gs.add_node("C", (400.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
+    let (n1, _) = gs.add_node(
+        "A",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (n2, _) = gs.add_node(
+        "B",
+        (200.0, 0.0),
+        vec![
+            (PortDirection::Input, SocketType::Float, "In".to_string()),
+            (PortDirection::Output, SocketType::Float, "Out".to_string()),
+        ],
+    );
+    let (n3, _) = gs.add_node(
+        "C",
+        (400.0, 0.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
 
     // Connect A→B→C
     let (out_a, in_b) = gs.with_graph(|g| {
         let a_ports = g.node_ports(n1);
         let b_ports = g.node_ports(n2);
-        let out_a = a_ports.iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output)).copied().unwrap();
-        let in_b = b_ports.iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
+        let out_a = a_ports
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output))
+            .copied()
+            .unwrap();
+        let in_b = b_ports
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input))
+            .copied()
+            .unwrap();
         (out_a, in_b)
     });
     gs.connect_ports(out_a, in_b).unwrap();
@@ -863,8 +1131,16 @@ fn setup_three_node_chain() -> (std::rc::Rc<GraphSignals>, EntityId, EntityId, E
     let (out_b, in_c) = gs.with_graph(|g| {
         let b_ports = g.node_ports(n2);
         let c_ports = g.node_ports(n3);
-        let out_b = b_ports.iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output)).copied().unwrap();
-        let in_c = c_ports.iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
+        let out_b = b_ports
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output))
+            .copied()
+            .unwrap();
+        let in_c = c_ports
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input))
+            .copied()
+            .unwrap();
         (out_b, in_c)
     });
     gs.connect_ports(out_b, in_c).unwrap();
@@ -885,10 +1161,18 @@ fn test_group_creation() {
     gs.group_selected();
 
     // Parent should have: A, C, Group (3 nodes)
-    assert_eq!(gs.node_count(), 3, "Parent should have A, C, and Group node");
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "Parent should have A, C, and Group node"
+    );
 
     // Parent should have connections: A→Group, Group→C
-    assert_eq!(gs.connection_count(), 2, "Parent should have 2 connections through group");
+    assert_eq!(
+        gs.connection_count(),
+        2,
+        "Parent should have 2 connections through group"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -903,8 +1187,10 @@ fn test_enter_group() {
 
     // Find the group node
     let group_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
     });
     assert!(group_node.is_some(), "Should have a group node");
     let group_node = group_node.unwrap();
@@ -913,13 +1199,21 @@ fn test_enter_group() {
     gs.enter_group(group_node);
 
     // Should be in a different graph now
-    assert_ne!(gs.current_graph_id.get(), root_id, "Should have navigated into subgraph");
+    assert_ne!(
+        gs.current_graph_id.get(),
+        root_id,
+        "Should have navigated into subgraph"
+    );
 
     // Subgraph should have: Group Input, Group Output, B (3 nodes)
     assert_eq!(gs.node_count(), 3, "Subgraph should have IO nodes + B");
 
     // Subgraph should have connections: GroupInput→B, B→GroupOutput
-    assert_eq!(gs.connection_count(), 2, "Subgraph should have IO connections");
+    assert_eq!(
+        gs.connection_count(),
+        2,
+        "Subgraph should have IO connections"
+    );
 
     // Breadcrumb should have 2 entries
     assert_eq!(gs.breadcrumb.lock_ref().len(), 2);
@@ -936,8 +1230,11 @@ fn test_exit_group() {
     let root_id = gs.editor.borrow().root_graph_id();
 
     let group_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
 
     gs.enter_group(group_node);
@@ -963,8 +1260,11 @@ fn test_ungroup() {
 
     // Find and select the group node
     let group_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
 
     gs.controller.borrow_mut().selection.clear();
@@ -972,7 +1272,11 @@ fn test_ungroup() {
     gs.ungroup_selected();
 
     // Group node dissolved; A, B, C all in parent
-    assert_eq!(gs.node_count(), 3, "After ungroup: A, B, C should be in parent");
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After ungroup: A, B, C should be in parent"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -984,8 +1288,11 @@ fn test_add_group_io_node() {
     gs.group_selected();
 
     let group_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
 
     let ports_before = gs.with_graph(|g| g.node_ports(group_node).len());
@@ -993,21 +1300,38 @@ fn test_add_group_io_node() {
     gs.enter_group(group_node);
 
     // Count IO nodes before
-    let io_count_before = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
+    let io_count_before = gs.with_graph(|g| {
+        g.world
+            .query::<nodegraph_core::graph::GroupIOKind>()
+            .count()
+    });
 
     // Add a new input IO node
     gs.add_group_io_at(nodegraph_core::graph::GroupIOKind::Input, (50.0, 200.0));
 
     // Should have one more IO node
-    let io_count_after = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
-    assert_eq!(io_count_after, io_count_before + 1, "Should have one more IO node");
+    let io_count_after = gs.with_graph(|g| {
+        g.world
+            .query::<nodegraph_core::graph::GroupIOKind>()
+            .count()
+    });
+    assert_eq!(
+        io_count_after,
+        io_count_before + 1,
+        "Should have one more IO node"
+    );
 
     // Exit and check group node gained a port
     let root_id = gs.editor.borrow().root_graph_id();
     gs.navigate_to_graph(root_id);
 
     let ports_after = gs.with_graph(|g| g.node_ports(group_node).len());
-    assert!(ports_after > ports_before, "Group node should have gained a port. Before: {}, After: {}", ports_before, ports_after);
+    assert!(
+        ports_after > ports_before,
+        "Group node should have gained a port. Before: {}, After: {}",
+        ports_before,
+        ports_after
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1019,8 +1343,11 @@ fn test_group_io_node_type_adapts() {
     gs.group_selected();
 
     let group_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
 
     gs.enter_group(group_node);
@@ -1033,7 +1360,10 @@ fn test_group_io_node_type_adapts() {
         let mut any_ports = Vec::new();
         for (nid, _) in g.world.query::<nodegraph_core::graph::GroupIOKind>() {
             for &pid in g.node_ports(nid) {
-                if let Some(st) = g.world.get::<nodegraph_core::graph::port::PortSocketType>(pid) {
+                if let Some(st) = g
+                    .world
+                    .get::<nodegraph_core::graph::port::PortSocketType>(pid)
+                {
                     if st.0 == SocketType::Any {
                         any_ports.push(pid);
                     }
@@ -1042,44 +1372,70 @@ fn test_group_io_node_type_adapts() {
         }
         any_ports.last().copied()
     });
-    assert!(new_io_port.is_some(), "Should have an Any-type port on new IO node");
+    assert!(
+        new_io_port.is_some(),
+        "Should have an Any-type port on new IO node"
+    );
     let new_io_port = new_io_port.unwrap();
 
     // Create a Color node inside the subgraph
-    let (color_node, _) = gs.add_node("ColorSink", (100.0, 100.0), vec![
-        (PortDirection::Input, SocketType::Color, "Color".to_string()),
-    ]);
+    let (color_node, _) = gs.add_node(
+        "ColorSink",
+        (100.0, 100.0),
+        vec![(PortDirection::Input, SocketType::Color, "Color".to_string())],
+    );
     let color_in = gs.with_graph(|g| g.node_ports(color_node)[0]);
 
     // Connect IO node's Any output → Color node's Color input
     let conn = gs.connect_ports(new_io_port, color_in);
-    assert!(conn.is_ok(), "Connection from IO Any output to Color input should succeed");
+    assert!(
+        conn.is_ok(),
+        "Connection from IO Any output to Color input should succeed"
+    );
 
     // The IO port should now be Color type
     let adapted_type = gs.with_graph(|g| {
-        g.world.get::<nodegraph_core::graph::port::PortSocketType>(new_io_port).map(|s| s.0)
+        g.world
+            .get::<nodegraph_core::graph::port::PortSocketType>(new_io_port)
+            .map(|s| s.0)
     });
-    assert_eq!(adapted_type, Some(SocketType::Color),
-        "IO port should adapt to Color after connection. Got: {:?}", adapted_type);
+    assert_eq!(
+        adapted_type,
+        Some(SocketType::Color),
+        "IO port should adapt to Color after connection. Got: {:?}",
+        adapted_type
+    );
 }
 
 #[wasm_bindgen_test]
 fn test_nested_groups() {
     let gs = GraphSignals::new();
-    let (_n1, _) = gs.add_node("A", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n3, _) = gs.add_node("C", (400.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (_n4, _) = gs.add_node("D", (600.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
+    let (_n1, _) = gs.add_node(
+        "A",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (n2, _) = gs.add_node(
+        "B",
+        (200.0, 0.0),
+        vec![
+            (PortDirection::Input, SocketType::Float, "In".to_string()),
+            (PortDirection::Output, SocketType::Float, "Out".to_string()),
+        ],
+    );
+    let (n3, _) = gs.add_node(
+        "C",
+        (400.0, 0.0),
+        vec![
+            (PortDirection::Input, SocketType::Float, "In".to_string()),
+            (PortDirection::Output, SocketType::Float, "Out".to_string()),
+        ],
+    );
+    let (_n4, _) = gs.add_node(
+        "D",
+        (600.0, 0.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
     let _tc = render_sync(&gs);
 
     let root_id = gs.editor.borrow().root_graph_id();
@@ -1094,8 +1450,11 @@ fn test_nested_groups() {
     assert_eq!(gs.node_count(), 3);
 
     let outer_group = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
 
     // Enter the outer group
@@ -1103,11 +1462,16 @@ fn test_nested_groups() {
     assert_eq!(gs.breadcrumb.lock_ref().len(), 2);
 
     // Inside: B, C (no IO nodes because no external connections)
-    assert_eq!(gs.node_count(), 2, "Outer subgraph should have B + C (no IO — no external connections)");
+    assert_eq!(
+        gs.node_count(),
+        2,
+        "Outer subgraph should have B + C (no IO — no external connections)"
+    );
 
     // Now group just C inside the subgraph (nested group)
     let inner_c = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::node::NodeHeader>()
+        g.world
+            .query::<nodegraph_core::graph::node::NodeHeader>()
             .find(|(_, h)| h.title == "C")
             .map(|(id, _)| id)
     });
@@ -1119,12 +1483,19 @@ fn test_nested_groups() {
     gs.group_selected();
 
     // Outer subgraph: B, InnerGroup (2 nodes — no IO because no external connections)
-    assert_eq!(gs.node_count(), 2, "Should have B + InnerGroup after inner grouping");
+    assert_eq!(
+        gs.node_count(),
+        2,
+        "Should have B + InnerGroup after inner grouping"
+    );
 
     // Find and enter the inner group
     let inner_group = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
     gs.enter_group(inner_group);
 
@@ -1138,7 +1509,11 @@ fn test_nested_groups() {
     gs.navigate_to_graph(root_id);
     assert_eq!(gs.current_graph_id.get(), root_id);
     assert_eq!(gs.breadcrumb.lock_ref().len(), 1);
-    assert_eq!(gs.node_count(), 3, "Root should still have A, D, OuterGroup");
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "Root should still have A, D, OuterGroup"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1151,9 +1526,14 @@ fn test_group_node_has_subgraph_root() {
 
     // The group node should have SubgraphRoot component
     let has_subgraph = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>().count()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .count()
     });
-    assert_eq!(has_subgraph, 1, "Should have exactly 1 group node with SubgraphRoot");
+    assert_eq!(
+        has_subgraph, 1,
+        "Should have exactly 1 group node with SubgraphRoot"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1167,12 +1547,19 @@ fn test_breadcrumb_updates() {
     gs.group_selected();
 
     let group_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
 
     gs.enter_group(group_node);
-    assert_eq!(gs.breadcrumb.lock_ref().len(), 2, "Should have Root > Group");
+    assert_eq!(
+        gs.breadcrumb.lock_ref().len(),
+        2,
+        "Should have Root > Group"
+    );
 
     let root_id = gs.editor.borrow().root_graph_id();
     gs.navigate_to_graph(root_id);
@@ -1197,8 +1584,11 @@ fn test_ungroup_restores_nodes_to_parent() {
     assert_eq!(gs.node_count(), 3); // A, C, Group
 
     let group_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
 
     // Ungroup
@@ -1206,9 +1596,19 @@ fn test_ungroup_restores_nodes_to_parent() {
     gs.ungroup_selected();
 
     // B should be back in the parent, not deleted
-    assert_eq!(gs.node_count(), 3, "After ungroup: A, B, C should all be in parent. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After ungroup: A, B, C should all be in parent. Got {}",
+        gs.node_count()
+    );
     // Connections A→B and B→C should be restored
-    assert_eq!(gs.connection_count(), 2, "After ungroup: connections should be restored. Got {}", gs.connection_count());
+    assert_eq!(
+        gs.connection_count(),
+        2,
+        "After ungroup: connections should be restored. Got {}",
+        gs.connection_count()
+    );
 }
 
 // ============================================================
@@ -1229,8 +1629,18 @@ fn test_undo_group() {
 
     // Undo should restore original 3 nodes
     gs.undo();
-    assert_eq!(gs.node_count(), 3, "After undo group: should have A, B, C. Got {}", gs.node_count());
-    assert_eq!(gs.connection_count(), 2, "After undo group: connections should be restored. Got {}", gs.connection_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After undo group: should have A, B, C. Got {}",
+        gs.node_count()
+    );
+    assert_eq!(
+        gs.connection_count(),
+        2,
+        "After undo group: connections should be restored. Got {}",
+        gs.connection_count()
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1240,8 +1650,11 @@ fn test_undo_delete_in_group() {
 
     // Delete node A
     let n1 = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::node::NodeHeader>()
-            .find(|(_, h)| h.title == "A").map(|(id, _)| id).unwrap()
+        g.world
+            .query::<nodegraph_core::graph::node::NodeHeader>()
+            .find(|(_, h)| h.title == "A")
+            .map(|(id, _)| id)
+            .unwrap()
     });
     gs.select_single(n1);
     gs.delete_selected();
@@ -1249,7 +1662,12 @@ fn test_undo_delete_in_group() {
 
     // Undo
     gs.undo();
-    assert_eq!(gs.node_count(), 3, "After undo delete: should have 3 nodes. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After undo delete: should have 3 nodes. Got {}",
+        gs.node_count()
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1266,7 +1684,12 @@ fn test_undo_add_node() {
 
     // Undo — node should be removed
     gs.undo();
-    assert_eq!(gs.node_count(), 2, "After undo add: should have 2 nodes. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        2,
+        "After undo add: should have 2 nodes. Got {}",
+        gs.node_count()
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1279,7 +1702,12 @@ fn test_undo_connect() {
     assert_eq!(gs.connection_count(), 1);
 
     gs.undo();
-    assert_eq!(gs.connection_count(), 0, "After undo connect: should have 0 connections. Got {}", gs.connection_count());
+    assert_eq!(
+        gs.connection_count(),
+        0,
+        "After undo connect: should have 0 connections. Got {}",
+        gs.connection_count()
+    );
 }
 
 // ============================================================
@@ -1297,8 +1725,11 @@ fn test_undo_ungroup() {
     assert_eq!(gs.node_count(), 3); // A, C, Group
 
     let group_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
 
     // Ungroup
@@ -1308,13 +1739,23 @@ fn test_undo_ungroup() {
 
     // Undo ungroup → group should be back
     gs.undo();
-    assert_eq!(gs.node_count(), 3, "After undo ungroup: should have A, C, Group. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After undo ungroup: should have A, C, Group. Got {}",
+        gs.node_count()
+    );
 
     // The group node should exist again with SubgraphRoot
     let has_group = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>().count()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .count()
     });
-    assert_eq!(has_group, 1, "After undo ungroup: group node should be back");
+    assert_eq!(
+        has_group, 1,
+        "After undo ungroup: group node should be back"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1326,32 +1767,57 @@ fn test_undo_add_io_node() {
     gs.group_selected();
 
     let group_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
 
     let group_ports_before = gs.with_graph(|g| g.node_ports(group_node).len());
 
     gs.enter_group(group_node);
 
-    let io_count_before = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
+    let io_count_before = gs.with_graph(|g| {
+        g.world
+            .query::<nodegraph_core::graph::GroupIOKind>()
+            .count()
+    });
 
     // Add a new IO node
     gs.add_group_io_at(nodegraph_core::graph::GroupIOKind::Input, (50.0, 200.0));
 
-    let io_count_after = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
-    assert_eq!(io_count_after, io_count_before + 1, "IO node should be added");
+    let io_count_after = gs.with_graph(|g| {
+        g.world
+            .query::<nodegraph_core::graph::GroupIOKind>()
+            .count()
+    });
+    assert_eq!(
+        io_count_after,
+        io_count_before + 1,
+        "IO node should be added"
+    );
 
     // Undo → IO node should be gone
     gs.undo();
-    let io_count_undone = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
-    assert_eq!(io_count_undone, io_count_before, "After undo: IO node should be removed");
+    let io_count_undone = gs.with_graph(|g| {
+        g.world
+            .query::<nodegraph_core::graph::GroupIOKind>()
+            .count()
+    });
+    assert_eq!(
+        io_count_undone, io_count_before,
+        "After undo: IO node should be removed"
+    );
 
     // Check parent group node also lost the port
     let root_id = gs.editor.borrow().root_graph_id();
     gs.navigate_to_graph(root_id);
     let group_ports_undone = gs.with_graph(|g| g.node_ports(group_node).len());
-    assert_eq!(group_ports_undone, group_ports_before, "After undo: parent group port should be removed too");
+    assert_eq!(
+        group_ports_undone, group_ports_before,
+        "After undo: parent group port should be removed too"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1372,26 +1838,53 @@ fn test_undo_redo_group_cycle() {
     assert_eq!(gs.node_count(), 3, "After undo group: A, B, C");
     assert_eq!(gs.connection_count(), 2, "After undo group: 2 connections");
     let has_group = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>().count()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .count()
     });
     assert_eq!(has_group, 0, "After undo group: no group nodes");
 
     // Redo group
     gs.redo();
-    assert_eq!(gs.node_count(), 3, "After redo group: A, C, Group. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After redo group: A, C, Group. Got {}",
+        gs.node_count()
+    );
 
     // Undo again
     gs.undo();
-    assert_eq!(gs.node_count(), 3, "After 2nd undo: A, B, C. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After 2nd undo: A, B, C. Got {}",
+        gs.node_count()
+    );
 
     // Redo again
     gs.redo();
-    assert_eq!(gs.node_count(), 3, "After 2nd redo: A, C, Group. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After 2nd redo: A, C, Group. Got {}",
+        gs.node_count()
+    );
 
     // Undo again
     gs.undo();
-    assert_eq!(gs.node_count(), 3, "After 3rd undo: A, B, C. Got {}", gs.node_count());
-    assert_eq!(gs.connection_count(), 2, "After 3rd undo: 2 connections. Got {}", gs.connection_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After 3rd undo: A, B, C. Got {}",
+        gs.node_count()
+    );
+    assert_eq!(
+        gs.connection_count(),
+        2,
+        "After 3rd undo: 2 connections. Got {}",
+        gs.connection_count()
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1407,11 +1900,18 @@ fn test_group_a_group_with_another_node() {
 
     // Find GroupB and C
     let (group_b, node_c) = gs.with_graph(|g| {
-        let group = g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap();
-        let c = g.world.query::<nodegraph_core::graph::node::NodeHeader>()
+        let group = g
+            .world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap();
+        let c = g
+            .world
+            .query::<nodegraph_core::graph::node::NodeHeader>()
             .find(|(_id, h)| h.title == "C")
-            .map(|(id, _)| id).unwrap();
+            .map(|(id, _)| id)
+            .unwrap();
         (group, c)
     });
 
@@ -1423,46 +1923,108 @@ fn test_group_a_group_with_another_node() {
     gs.group_selected();
 
     // Should have: A, OuterGroup (2 nodes)
-    assert_eq!(gs.node_count(), 2, "After nesting: A + OuterGroup. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        2,
+        "After nesting: A + OuterGroup. Got {}",
+        gs.node_count()
+    );
 
     // Undo → back to A, C, GroupB
     gs.undo();
-    assert_eq!(gs.node_count(), 3, "After undo nested group: A, C, GroupB. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After undo nested group: A, C, GroupB. Got {}",
+        gs.node_count()
+    );
 
     // Undo again → back to A, B, C
     gs.undo();
-    assert_eq!(gs.node_count(), 3, "After undo first group: A, B, C. Got {}", gs.node_count());
-    assert_eq!(gs.connection_count(), 2, "After full undo: 2 connections. Got {}", gs.connection_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After undo first group: A, B, C. Got {}",
+        gs.node_count()
+    );
+    assert_eq!(
+        gs.connection_count(),
+        2,
+        "After full undo: 2 connections. Got {}",
+        gs.connection_count()
+    );
 }
 
 #[wasm_bindgen_test]
 fn test_nested_group_undo_redo_stress() {
     // A → B → C → D, group B+C, undo, redo, undo, group B only, undo, redo
     let gs = GraphSignals::new();
-    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n3, _) = gs.add_node("C", (400.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n4, _) = gs.add_node("D", (600.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
+    let (n1, _) = gs.add_node(
+        "A",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (n2, _) = gs.add_node(
+        "B",
+        (200.0, 0.0),
+        vec![
+            (PortDirection::Input, SocketType::Float, "In".to_string()),
+            (PortDirection::Output, SocketType::Float, "Out".to_string()),
+        ],
+    );
+    let (n3, _) = gs.add_node(
+        "C",
+        (400.0, 0.0),
+        vec![
+            (PortDirection::Input, SocketType::Float, "In".to_string()),
+            (PortDirection::Output, SocketType::Float, "Out".to_string()),
+        ],
+    );
+    let (n4, _) = gs.add_node(
+        "D",
+        (600.0, 0.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
     let _tc = render_sync(&gs);
 
     // Connect A→B→C→D
     let ports = gs.with_graph(|g| {
-        let a_out = g.node_ports(n1).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output)).copied().unwrap();
-        let b_in = g.node_ports(n2).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
-        let b_out = g.node_ports(n2).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output)).copied().unwrap();
-        let c_in = g.node_ports(n3).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
-        let c_out = g.node_ports(n3).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output)).copied().unwrap();
-        let d_in = g.node_ports(n4).iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
+        let a_out = g
+            .node_ports(n1)
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output))
+            .copied()
+            .unwrap();
+        let b_in = g
+            .node_ports(n2)
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input))
+            .copied()
+            .unwrap();
+        let b_out = g
+            .node_ports(n2)
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output))
+            .copied()
+            .unwrap();
+        let c_in = g
+            .node_ports(n3)
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input))
+            .copied()
+            .unwrap();
+        let c_out = g
+            .node_ports(n3)
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output))
+            .copied()
+            .unwrap();
+        let d_in = g
+            .node_ports(n4)
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input))
+            .copied()
+            .unwrap();
         (a_out, b_in, b_out, c_in, c_out, d_in)
     });
     gs.connect_ports(ports.0, ports.1).unwrap();
@@ -1478,21 +2040,51 @@ fn test_nested_group_undo_redo_stress() {
     gs.controller.borrow_mut().selection.select(n3);
     gs.selection.set(vec![n2, n3]);
     gs.group_selected();
-    assert_eq!(gs.node_count(), 3, "After group B+C: A, D, Group. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After group B+C: A, D, Group. Got {}",
+        gs.node_count()
+    );
 
     // Undo
     gs.undo();
-    assert_eq!(gs.node_count(), 4, "After undo: A, B, C, D. Got {}", gs.node_count());
-    assert_eq!(gs.connection_count(), 3, "After undo: 3 connections. Got {}", gs.connection_count());
+    assert_eq!(
+        gs.node_count(),
+        4,
+        "After undo: A, B, C, D. Got {}",
+        gs.node_count()
+    );
+    assert_eq!(
+        gs.connection_count(),
+        3,
+        "After undo: 3 connections. Got {}",
+        gs.connection_count()
+    );
 
     // Redo
     gs.redo();
-    assert_eq!(gs.node_count(), 3, "After redo: A, D, Group. Got {}", gs.node_count());
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "After redo: A, D, Group. Got {}",
+        gs.node_count()
+    );
 
     // Undo again
     gs.undo();
-    assert_eq!(gs.node_count(), 4, "After 2nd undo: A, B, C, D. Got {}", gs.node_count());
-    assert_eq!(gs.connection_count(), 3, "After 2nd undo: 3 connections. Got {}", gs.connection_count());
+    assert_eq!(
+        gs.node_count(),
+        4,
+        "After 2nd undo: A, B, C, D. Got {}",
+        gs.node_count()
+    );
+    assert_eq!(
+        gs.connection_count(),
+        3,
+        "After 2nd undo: 3 connections. Got {}",
+        gs.connection_count()
+    );
 }
 
 // ============================================================
@@ -1524,7 +2116,11 @@ fn test_undo_create_frame() {
     assert_eq!(gs.with_graph(|g| g.frame_count()), 1);
 
     gs.undo();
-    assert_eq!(gs.with_graph(|g| g.frame_count()), 0, "After undo: frame should be gone");
+    assert_eq!(
+        gs.with_graph(|g| g.frame_count()),
+        0,
+        "After undo: frame should be gone"
+    );
     assert_eq!(gs.node_count(), 3, "Nodes unaffected");
 }
 
@@ -1541,8 +2137,11 @@ fn test_frame_has_correct_members() {
     gs.create_frame_around_selected();
 
     let members = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::frame::FrameMembers>()
-            .map(|(_, m)| m.0.len()).next().unwrap_or(0)
+        g.world
+            .query::<nodegraph_core::graph::frame::FrameMembers>()
+            .map(|(_, m)| m.0.len())
+            .next()
+            .unwrap_or(0)
     });
     assert_eq!(members, 2, "Frame should have 2 members");
 }
@@ -1556,17 +2155,23 @@ fn test_spawn_reroute() {
     let (gs, _, _, _, _) = new_two_node_graph();
     register_test_types(&gs);
     // Also register reroute
-    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
-        type_id: "reroute".into(),
-        display_name: "Reroute".into(),
-        category: "Utility".into(),
-        input_ports: vec![nodegraph_core::search::PortDefinition {
-            direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into(),
-        }],
-        output_ports: vec![nodegraph_core::search::PortDefinition {
-            direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into(),
-        }],
-    });
+    gs.registry
+        .borrow_mut()
+        .register(nodegraph_core::search::NodeTypeDefinition {
+            type_id: "reroute".into(),
+            display_name: "Reroute".into(),
+            category: "Utility".into(),
+            input_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Input,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+            output_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+        });
     let _tc = render_sync(&gs);
 
     gs.spawn_from_registry("reroute", (200.0, 200.0));
@@ -1575,7 +2180,9 @@ fn test_spawn_reroute() {
 
     // Check it has IsReroute marker
     let has_reroute = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::reroute::IsReroute>().count()
+        g.world
+            .query::<nodegraph_core::graph::reroute::IsReroute>()
+            .count()
     });
     assert_eq!(has_reroute, 1, "Should have 1 reroute node");
 }
@@ -1583,28 +2190,43 @@ fn test_spawn_reroute() {
 #[wasm_bindgen_test]
 fn test_reroute_has_any_ports() {
     let gs = GraphSignals::new();
-    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
-        type_id: "reroute".into(),
-        display_name: "Reroute".into(),
-        category: "Utility".into(),
-        input_ports: vec![nodegraph_core::search::PortDefinition {
-            direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into(),
-        }],
-        output_ports: vec![nodegraph_core::search::PortDefinition {
-            direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into(),
-        }],
-    });
+    gs.registry
+        .borrow_mut()
+        .register(nodegraph_core::search::NodeTypeDefinition {
+            type_id: "reroute".into(),
+            display_name: "Reroute".into(),
+            category: "Utility".into(),
+            input_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Input,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+            output_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+        });
     let _tc = render_sync(&gs);
 
     gs.spawn_from_registry("reroute", (100.0, 100.0));
 
     // Check port types are Any
     let port_types = gs.with_graph(|g| {
-        let reroute_id = g.world.query::<nodegraph_core::graph::reroute::IsReroute>()
-            .map(|(id, _)| id).next().unwrap();
-        g.node_ports(reroute_id).iter().map(|&pid| {
-            g.world.get::<nodegraph_core::graph::port::PortSocketType>(pid).map(|s| s.0)
-        }).collect::<Vec<_>>()
+        let reroute_id = g
+            .world
+            .query::<nodegraph_core::graph::reroute::IsReroute>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap();
+        g.node_ports(reroute_id)
+            .iter()
+            .map(|&pid| {
+                g.world
+                    .get::<nodegraph_core::graph::port::PortSocketType>(pid)
+                    .map(|s| s.0)
+            })
+            .collect::<Vec<_>>()
     });
     assert_eq!(port_types.len(), 2);
     assert_eq!(port_types[0], Some(SocketType::Any));
@@ -1614,15 +2236,23 @@ fn test_reroute_has_any_ports() {
 #[wasm_bindgen_test]
 fn test_undo_spawn_reroute() {
     let gs = GraphSignals::new();
-    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
-        type_id: "reroute".into(), display_name: "Reroute".into(), category: "Utility".into(),
-        input_ports: vec![nodegraph_core::search::PortDefinition {
-            direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into(),
-        }],
-        output_ports: vec![nodegraph_core::search::PortDefinition {
-            direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into(),
-        }],
-    });
+    gs.registry
+        .borrow_mut()
+        .register(nodegraph_core::search::NodeTypeDefinition {
+            type_id: "reroute".into(),
+            display_name: "Reroute".into(),
+            category: "Utility".into(),
+            input_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Input,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+            output_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+        });
     let _tc = render_sync(&gs);
 
     assert_eq!(gs.node_count(), 0);
@@ -1646,7 +2276,11 @@ fn test_frame_appears_in_frame_list() {
     gs.selection.set(vec![n1, n2]);
     gs.create_frame_around_selected();
 
-    assert_eq!(gs.frame_list.lock_ref().len(), 1, "frame_list should have 1 entry for SVG rendering");
+    assert_eq!(
+        gs.frame_list.lock_ref().len(),
+        1,
+        "frame_list should have 1 entry for SVG rendering"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1662,17 +2296,34 @@ fn test_frame_rect_bounds_contain_members() {
     gs.create_frame_around_selected();
 
     let rect = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::frame::FrameRect>()
-            .map(|(_, r)| r.clone()).next()
+        g.world
+            .query::<nodegraph_core::graph::frame::FrameRect>()
+            .map(|(_, r)| r.clone())
+            .next()
     });
     assert!(rect.is_some());
     let rect = rect.unwrap();
 
     // Frame should enclose both nodes with padding
-    assert!(rect.x < 0.0, "Frame x={} should be left of node A (at 0)", rect.x);
-    assert!(rect.y < 0.0, "Frame y={} should be above node A (at 0)", rect.y);
-    assert!(rect.x + rect.w > 200.0, "Frame right edge should be past node B (at 200)");
-    assert!(rect.w > 200.0, "Frame width={} should span both nodes", rect.w);
+    assert!(
+        rect.x < 0.0,
+        "Frame x={} should be left of node A (at 0)",
+        rect.x
+    );
+    assert!(
+        rect.y < 0.0,
+        "Frame y={} should be above node A (at 0)",
+        rect.y
+    );
+    assert!(
+        rect.x + rect.w > 200.0,
+        "Frame right edge should be past node B (at 200)"
+    );
+    assert!(
+        rect.w > 200.0,
+        "Frame width={} should span both nodes",
+        rect.w
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1685,25 +2336,38 @@ fn test_undo_frame_clears_frame_list() {
     assert_eq!(gs.frame_list.lock_ref().len(), 1);
 
     gs.undo();
-    assert_eq!(gs.frame_list.lock_ref().len(), 0, "frame_list should be empty after undo");
+    assert_eq!(
+        gs.frame_list.lock_ref().len(),
+        0,
+        "frame_list should be empty after undo"
+    );
 }
 
 #[wasm_bindgen_test]
 fn test_connect_through_reroute() {
     let gs = GraphSignals::new();
     // Create source (Float output), reroute (Any in/out), sink (Float input)
-    let (src, _) = gs.add_node("Src", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (sink, _) = gs.add_node("Sink", (400.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
-    let (reroute, _) = gs.add_node("", (200.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Any, "".to_string()),
-        (PortDirection::Output, SocketType::Any, "".to_string()),
-    ]);
+    let (src, _) = gs.add_node(
+        "Src",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (sink, _) = gs.add_node(
+        "Sink",
+        (400.0, 0.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
+    let (reroute, _) = gs.add_node(
+        "",
+        (200.0, 0.0),
+        vec![
+            (PortDirection::Input, SocketType::Any, "".to_string()),
+            (PortDirection::Output, SocketType::Any, "".to_string()),
+        ],
+    );
     gs.with_graph_mut(|g| {
-        g.world.insert(reroute, nodegraph_core::graph::reroute::IsReroute);
+        g.world
+            .insert(reroute, nodegraph_core::graph::reroute::IsReroute);
     });
     let _tc = render_sync(&gs);
 
@@ -1719,13 +2383,21 @@ fn test_connect_through_reroute() {
     gs.connect_ports(src_out, reroute_in).unwrap();
     gs.connect_ports(reroute_out, sink_in).unwrap();
 
-    assert_eq!(gs.connection_count(), 2, "Should have 2 connections through reroute");
+    assert_eq!(
+        gs.connection_count(),
+        2,
+        "Should have 2 connections through reroute"
+    );
 
     // Delete the reroute
     gs.select_single(reroute);
     gs.delete_selected();
     assert_eq!(gs.node_count(), 2, "Reroute deleted, Src and Sink remain");
-    assert_eq!(gs.connection_count(), 1, "Auto-reconnected: Src → Sink after reroute deleted");
+    assert_eq!(
+        gs.connection_count(),
+        1,
+        "Auto-reconnected: Src → Sink after reroute deleted"
+    );
 
     // Undo → reroute + connections back
     gs.undo();
@@ -1736,19 +2408,31 @@ fn test_connect_through_reroute() {
 #[wasm_bindgen_test]
 fn test_reroute_in_node_list() {
     let gs = GraphSignals::new();
-    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
-        type_id: "reroute".into(), display_name: "Reroute".into(), category: "Utility".into(),
-        input_ports: vec![nodegraph_core::search::PortDefinition {
-            direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into(),
-        }],
-        output_ports: vec![nodegraph_core::search::PortDefinition {
-            direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into(),
-        }],
-    });
+    gs.registry
+        .borrow_mut()
+        .register(nodegraph_core::search::NodeTypeDefinition {
+            type_id: "reroute".into(),
+            display_name: "Reroute".into(),
+            category: "Utility".into(),
+            input_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Input,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+            output_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+        });
     let _tc = render_sync(&gs);
 
     gs.spawn_from_registry("reroute", (100.0, 100.0));
-    assert_eq!(gs.node_list.lock_ref().len(), 1, "Reroute should be in node_list for SVG rendering");
+    assert_eq!(
+        gs.node_list.lock_ref().len(),
+        1,
+        "Reroute should be in node_list for SVG rendering"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -1798,7 +2482,11 @@ fn test_delete_frame_leaves_nodes() {
     // Nodes and connections still exist
     assert_eq!(gs.with_graph(|g| g.frame_count()), 0);
     assert_eq!(gs.node_count(), 2, "Nodes must survive frame deletion");
-    assert_eq!(gs.with_graph(|g| g.connection_count()), 1, "Connections must survive frame deletion");
+    assert_eq!(
+        gs.with_graph(|g| g.connection_count()),
+        1,
+        "Connections must survive frame deletion"
+    );
 
     // Redo restores the frame
     gs.redo();
@@ -1823,7 +2511,7 @@ fn test_delete_node_cleans_frame_members() {
 
     // Verify frame has 2 members
     let member_count = gs.with_graph(|g| {
-        use nodegraph_core::graph::frame::{FrameRect, FrameMembers};
+        use nodegraph_core::graph::frame::{FrameMembers, FrameRect};
         let (fid, _) = g.world.query::<FrameRect>().next().unwrap();
         g.world.get::<FrameMembers>(fid).unwrap().0.len()
     });
@@ -1837,11 +2525,14 @@ fn test_delete_node_cleans_frame_members() {
 
     // Frame should now have 1 member
     let member_count = gs.with_graph(|g| {
-        use nodegraph_core::graph::frame::{FrameRect, FrameMembers};
+        use nodegraph_core::graph::frame::{FrameMembers, FrameRect};
         let (fid, _) = g.world.query::<FrameRect>().next().unwrap();
         g.world.get::<FrameMembers>(fid).unwrap().0.len()
     });
-    assert_eq!(member_count, 1, "Deleted node must be removed from frame members");
+    assert_eq!(
+        member_count, 1,
+        "Deleted node must be removed from frame members"
+    );
 }
 
 // ── Duplicate reroute preserves IsReroute marker ────────────────────
@@ -1850,17 +2541,23 @@ fn test_duplicate_reroute_preserves_marker() {
     let (gs, _, _, _, _) = new_two_node_graph();
     register_test_types(&gs);
     // Register reroute type
-    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
-        type_id: "reroute".into(),
-        display_name: "Reroute".into(),
-        category: "Utility".into(),
-        input_ports: vec![nodegraph_core::search::PortDefinition {
-            direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into(),
-        }],
-        output_ports: vec![nodegraph_core::search::PortDefinition {
-            direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into(),
-        }],
-    });
+    gs.registry
+        .borrow_mut()
+        .register(nodegraph_core::search::NodeTypeDefinition {
+            type_id: "reroute".into(),
+            display_name: "Reroute".into(),
+            category: "Utility".into(),
+            input_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Input,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+            output_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+        });
     let _tc = render_sync(&gs);
 
     gs.spawn_from_registry("reroute", (200.0, 200.0));
@@ -1868,8 +2565,11 @@ fn test_duplicate_reroute_preserves_marker() {
 
     // Select the reroute and duplicate
     let reroute_id = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::reroute::IsReroute>()
-            .next().unwrap().0
+        g.world
+            .query::<nodegraph_core::graph::reroute::IsReroute>()
+            .next()
+            .unwrap()
+            .0
     });
     gs.controller.borrow_mut().selection.clear();
     gs.controller.borrow_mut().selection.select(reroute_id);
@@ -1880,9 +2580,14 @@ fn test_duplicate_reroute_preserves_marker() {
 
     // Both reroute nodes should have IsReroute
     let reroute_count = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::reroute::IsReroute>().count()
+        g.world
+            .query::<nodegraph_core::graph::reroute::IsReroute>()
+            .count()
     });
-    assert_eq!(reroute_count, 2, "Duplicated reroute must preserve IsReroute marker");
+    assert_eq!(
+        reroute_count, 2,
+        "Duplicated reroute must preserve IsReroute marker"
+    );
 }
 
 // ── Frame bounds update when member nodes move ──────────────────────
@@ -1908,14 +2613,15 @@ fn test_frame_bounds_track_member_positions() {
     // Get initial bounds
     let initial_bounds = gs.get_frame_bounds_signal(frame_id).unwrap().get();
 
-    use nodegraph_core::interaction::{InputEvent, MouseButton, Modifiers};
+    use nodegraph_core::interaction::{InputEvent, Modifiers, MouseButton};
     use nodegraph_core::layout::Vec2;
 
     // Simulate a real drag of n1: click on it, move, release
     // n1 is at (100, 100), click center of header
     let click = Vec2::new(180.0, 114.0);
     gs.handle_input(InputEvent::MouseDown {
-        screen: click, world: click,
+        screen: click,
+        world: click,
         button: MouseButton::Left,
         modifiers: Modifiers::default(),
     });
@@ -1923,19 +2629,24 @@ fn test_frame_bounds_track_member_positions() {
     // Move by (100, 100)
     let drag_to = Vec2::new(280.0, 214.0);
     gs.handle_input(InputEvent::MouseMove {
-        screen: drag_to, world: drag_to,
+        screen: drag_to,
+        world: drag_to,
         modifiers: Modifiers::default(),
     });
 
     gs.handle_input(InputEvent::MouseUp {
-        screen: drag_to, world: drag_to,
+        screen: drag_to,
+        world: drag_to,
         button: MouseButton::Left,
         modifiers: Modifiers::default(),
     });
 
     let updated_bounds = gs.get_frame_bounds_signal(frame_id).unwrap().get();
     // Frame bounds should have changed because node moved
-    assert_ne!(initial_bounds, updated_bounds, "Frame bounds must update when member nodes move");
+    assert_ne!(
+        initial_bounds, updated_bounds,
+        "Frame bounds must update when member nodes move"
+    );
 }
 
 // ── Frame drag selects and moves all member nodes ───────────────────
@@ -1955,15 +2666,21 @@ fn test_frame_drag_moves_members() {
 
     // Get original positions
     let orig_n1 = gs.with_graph(|g| {
-        let p = g.world.get::<nodegraph_core::graph::node::NodePosition>(n1).unwrap();
+        let p = g
+            .world
+            .get::<nodegraph_core::graph::node::NodePosition>(n1)
+            .unwrap();
         (p.x, p.y)
     });
     let orig_n2 = gs.with_graph(|g| {
-        let p = g.world.get::<nodegraph_core::graph::node::NodePosition>(n2).unwrap();
+        let p = g
+            .world
+            .get::<nodegraph_core::graph::node::NodePosition>(n2)
+            .unwrap();
         (p.x, p.y)
     });
 
-    use nodegraph_core::interaction::{InputEvent, MouseButton, Modifiers};
+    use nodegraph_core::interaction::{InputEvent, Modifiers, MouseButton};
     use nodegraph_core::layout::Vec2;
 
     // Click inside frame padding area (not on any node)
@@ -1971,41 +2688,67 @@ fn test_frame_drag_moves_members() {
     // Click at (75, 75) — inside frame padding, outside any node rect.
     let click = Vec2::new(75.0, 75.0);
     gs.handle_input(InputEvent::MouseDown {
-        screen: click, world: click,
+        screen: click,
+        world: click,
         button: MouseButton::Left,
         modifiers: Modifiers::default(),
     });
 
     // Both nodes should now be selected
-    assert_eq!(gs.selection.get_cloned().len(), 2, "Frame click should select all member nodes");
+    assert_eq!(
+        gs.selection.get_cloned().len(),
+        2,
+        "Frame click should select all member nodes"
+    );
 
     // Drag to move by (50, 30)
     let drag_to = Vec2::new(125.0, 105.0);
     gs.handle_input(InputEvent::MouseMove {
-        screen: drag_to, world: drag_to,
+        screen: drag_to,
+        world: drag_to,
         modifiers: Modifiers::default(),
     });
 
     gs.handle_input(InputEvent::MouseUp {
-        screen: drag_to, world: drag_to,
+        screen: drag_to,
+        world: drag_to,
         button: MouseButton::Left,
         modifiers: Modifiers::default(),
     });
 
     // Verify both nodes moved by (50, 30)
     let new_n1 = gs.with_graph(|g| {
-        let p = g.world.get::<nodegraph_core::graph::node::NodePosition>(n1).unwrap();
+        let p = g
+            .world
+            .get::<nodegraph_core::graph::node::NodePosition>(n1)
+            .unwrap();
         (p.x, p.y)
     });
     let new_n2 = gs.with_graph(|g| {
-        let p = g.world.get::<nodegraph_core::graph::node::NodePosition>(n2).unwrap();
+        let p = g
+            .world
+            .get::<nodegraph_core::graph::node::NodePosition>(n2)
+            .unwrap();
         (p.x, p.y)
     });
 
-    assert!((new_n1.0 - orig_n1.0 - 50.0).abs() < 1e-6, "N1 x should move by 50, got delta {}", new_n1.0 - orig_n1.0);
-    assert!((new_n1.1 - orig_n1.1 - 30.0).abs() < 1e-6, "N1 y should move by 30");
-    assert!((new_n2.0 - orig_n2.0 - 50.0).abs() < 1e-6, "N2 x should move by 50");
-    assert!((new_n2.1 - orig_n2.1 - 30.0).abs() < 1e-6, "N2 y should move by 30");
+    assert!(
+        (new_n1.0 - orig_n1.0 - 50.0).abs() < 1e-6,
+        "N1 x should move by 50, got delta {}",
+        new_n1.0 - orig_n1.0
+    );
+    assert!(
+        (new_n1.1 - orig_n1.1 - 30.0).abs() < 1e-6,
+        "N1 y should move by 30"
+    );
+    assert!(
+        (new_n2.0 - orig_n2.0 - 50.0).abs() < 1e-6,
+        "N2 x should move by 50"
+    );
+    assert!(
+        (new_n2.1 - orig_n2.1 - 30.0).abs() < 1e-6,
+        "N2 y should move by 30"
+    );
 }
 
 // ── Delete frame via frame selection + delete_selected ──────────────
@@ -2026,31 +2769,49 @@ fn test_delete_selected_frame() {
     assert_eq!(gs.with_graph(|g| g.frame_count()), 1);
 
     // Select the frame by clicking in its padding
-    use nodegraph_core::interaction::{InputEvent, MouseButton, Modifiers};
+    use nodegraph_core::interaction::{InputEvent, Modifiers, MouseButton};
     use nodegraph_core::layout::Vec2;
     let click = Vec2::new(75.0, 75.0);
     gs.handle_input(InputEvent::MouseDown {
-        screen: click, world: click,
+        screen: click,
+        world: click,
         button: MouseButton::Left,
         modifiers: Modifiers::default(),
     });
     gs.handle_input(InputEvent::MouseUp {
-        screen: click, world: click,
+        screen: click,
+        world: click,
         button: MouseButton::Left,
         modifiers: Modifiers::default(),
     });
 
-    assert_eq!(gs.selected_frames.get_cloned().len(), 1, "Frame should be selected");
+    assert_eq!(
+        gs.selected_frames.get_cloned().len(),
+        1,
+        "Frame should be selected"
+    );
 
     // Delete — should remove frame only, NOT member nodes
     gs.delete_selected();
 
-    assert_eq!(gs.with_graph(|g| g.frame_count()), 0, "Frame should be deleted");
-    assert_eq!(gs.node_count(), 2, "Member nodes should survive frame deletion");
+    assert_eq!(
+        gs.with_graph(|g| g.frame_count()),
+        0,
+        "Frame should be deleted"
+    );
+    assert_eq!(
+        gs.node_count(),
+        2,
+        "Member nodes should survive frame deletion"
+    );
 
     // Undo restores the frame
     gs.undo();
-    assert_eq!(gs.with_graph(|g| g.frame_count()), 1, "Frame restored after undo");
+    assert_eq!(
+        gs.with_graph(|g| g.frame_count()),
+        1,
+        "Frame restored after undo"
+    );
     assert_eq!(gs.node_count(), 2, "Nodes still intact after undo");
 }
 
@@ -2060,36 +2821,64 @@ async fn test_noodle_drop_search_menu_dom_filtered() {
     let gs = GraphSignals::new();
 
     // Register 3 types: Math Add (Float), Material Output (Shader), Reroute (Any)
-    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
-        type_id: "math_add".into(), display_name: "Math Add".into(), category: "Math".into(),
-        input_ports: vec![
-            nodegraph_core::search::PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "A".into() },
-        ],
-        output_ports: vec![
-            nodegraph_core::search::PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Float, label: "Result".into() },
-        ],
-    });
-    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
-        type_id: "material_output".into(), display_name: "Material Output".into(), category: "Output".into(),
-        input_ports: vec![
-            nodegraph_core::search::PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Shader, label: "Surface".into() },
-        ],
-        output_ports: vec![],
-    });
-    gs.registry.borrow_mut().register(nodegraph_core::search::NodeTypeDefinition {
-        type_id: "reroute".into(), display_name: "Reroute".into(), category: "Utility".into(),
-        input_ports: vec![
-            nodegraph_core::search::PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into() },
-        ],
-        output_ports: vec![
-            nodegraph_core::search::PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into() },
-        ],
-    });
+    gs.registry
+        .borrow_mut()
+        .register(nodegraph_core::search::NodeTypeDefinition {
+            type_id: "math_add".into(),
+            display_name: "Math Add".into(),
+            category: "Math".into(),
+            input_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Input,
+                socket_type: SocketType::Float,
+                label: "A".into(),
+            }],
+            output_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Float,
+                label: "Result".into(),
+            }],
+        });
+    gs.registry
+        .borrow_mut()
+        .register(nodegraph_core::search::NodeTypeDefinition {
+            type_id: "material_output".into(),
+            display_name: "Material Output".into(),
+            category: "Output".into(),
+            input_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Input,
+                socket_type: SocketType::Shader,
+                label: "Surface".into(),
+            }],
+            output_ports: vec![],
+        });
+    gs.registry
+        .borrow_mut()
+        .register(nodegraph_core::search::NodeTypeDefinition {
+            type_id: "reroute".into(),
+            display_name: "Reroute".into(),
+            category: "Utility".into(),
+            input_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Input,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+            output_ports: vec![nodegraph_core::search::PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Any,
+                label: "".into(),
+            }],
+        });
 
     // Add a node with a Shader output so we have a real port to drag from
-    let (shader_node, _) = gs.add_node("BSDF", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Shader, "BSDF".to_string()),
-    ]);
+    let (shader_node, _) = gs.add_node(
+        "BSDF",
+        (0.0, 0.0),
+        vec![(
+            PortDirection::Output,
+            SocketType::Shader,
+            "BSDF".to_string(),
+        )],
+    );
     let shader_port = gs.with_graph(|g| g.node_ports(shader_node)[0]);
 
     // Render the full editor (including search menu)
@@ -2100,13 +2889,18 @@ async fn test_noodle_drop_search_menu_dom_filtered() {
     gs.start_connecting(shader_port, port_pos, port_pos);
     let empty = Vec2::new(500.0, 500.0);
     gs.handle_input(InputEvent::MouseUp {
-        screen: empty, world: empty,
-        button: MouseButton::Left, modifiers: Modifiers::default(),
+        screen: empty,
+        world: empty,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
     });
 
     // Verify search menu is open with pending connection
     assert!(gs.search_menu.get().is_some(), "Search menu should be open");
-    assert!(gs.pending_connection.get().is_some(), "pending_connection should be set");
+    assert!(
+        gs.pending_connection.get().is_some(),
+        "pending_connection should be set"
+    );
 
     // Flush microtasks so dominator signals propagate to DOM
     let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
@@ -2120,14 +2914,23 @@ async fn test_noodle_drop_search_menu_dom_filtered() {
     let text = menu_el.text_content().unwrap_or_default();
 
     // Material Output has Shader input — should appear
-    assert!(text.contains("Material Output"),
-        "DOM should show Material Output for Shader source, got: {}", text);
+    assert!(
+        text.contains("Material Output"),
+        "DOM should show Material Output for Shader source, got: {}",
+        text
+    );
     // Reroute has Any input — should appear
-    assert!(text.contains("Reroute"),
-        "DOM should show Reroute for Shader source, got: {}", text);
+    assert!(
+        text.contains("Reroute"),
+        "DOM should show Reroute for Shader source, got: {}",
+        text
+    );
     // Math Add has Float input — should NOT appear
-    assert!(!text.contains("Math Add"),
-        "DOM should NOT show Math Add for Shader source, got: {}", text);
+    assert!(
+        !text.contains("Math Add"),
+        "DOM should NOT show Math Add for Shader source, got: {}",
+        text
+    );
 }
 
 // ── Group IO nodes render as compact rects ──────────────────────────
@@ -2136,20 +2939,33 @@ async fn test_group_io_nodes_render_compact() {
     use nodegraph_core::layout::IO_NODE_WIDTH;
 
     let gs = GraphSignals::new();
-    let (n1, _) = gs.add_node("A", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n2, _) = gs.add_node("B", (200.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (n3, _) = gs.add_node("C", (400.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
+    let (n1, _) = gs.add_node(
+        "A",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (n2, _) = gs.add_node(
+        "B",
+        (200.0, 0.0),
+        vec![
+            (PortDirection::Input, SocketType::Float, "In".to_string()),
+            (PortDirection::Output, SocketType::Float, "Out".to_string()),
+        ],
+    );
+    let (n3, _) = gs.add_node(
+        "C",
+        (400.0, 0.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
 
     // Connect A→B→C
     let (a_out, b_in, b_out, c_in) = gs.with_graph(|g| {
-        (g.node_ports(n1)[0], g.node_ports(n2)[0], g.node_ports(n2)[1], g.node_ports(n3)[0])
+        (
+            g.node_ports(n1)[0],
+            g.node_ports(n2)[0],
+            g.node_ports(n2)[1],
+            g.node_ports(n3)[0],
+        )
     });
     gs.connect_ports(a_out, b_in).unwrap();
     gs.connect_ports(b_out, c_in).unwrap();
@@ -2162,8 +2978,11 @@ async fn test_group_io_nodes_render_compact() {
 
     // Find and enter the group
     let group_node = gs.with_graph(|g| {
-        g.world.query::<nodegraph_core::graph::group::SubgraphRoot>()
-            .map(|(id, _)| id).next().unwrap()
+        g.world
+            .query::<nodegraph_core::graph::group::SubgraphRoot>()
+            .map(|(id, _)| id)
+            .next()
+            .unwrap()
     });
     gs.enter_group(group_node);
 
@@ -2172,10 +2991,18 @@ async fn test_group_io_nodes_render_compact() {
     let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 
     // Inside the group we should have: 1 Input IO + B + 1 Output IO = 3 nodes
-    assert_eq!(gs.node_count(), 3, "Subgraph should have Input IO + B + Output IO");
+    assert_eq!(
+        gs.node_count(),
+        3,
+        "Subgraph should have Input IO + B + Output IO"
+    );
 
     // Verify IO nodes have GroupIOKind
-    let io_count = gs.with_graph(|g| g.world.query::<nodegraph_core::graph::GroupIOKind>().count());
+    let io_count = gs.with_graph(|g| {
+        g.world
+            .query::<nodegraph_core::graph::GroupIOKind>()
+            .count()
+    });
     assert_eq!(io_count, 2, "Should have 2 IO nodes");
 
     // Check DOM: IO node rects should have width = IO_NODE_WIDTH (120)
@@ -2194,7 +3021,11 @@ async fn test_group_io_nodes_render_compact() {
             }
         }
     }
-    assert_eq!(io_width_count, 2, "Should have 2 IO nodes rendered with IO_NODE_WIDTH={}, found {}", IO_NODE_WIDTH, io_width_count);
+    assert_eq!(
+        io_width_count, 2,
+        "Should have 2 IO nodes rendered with IO_NODE_WIDTH={}, found {}",
+        IO_NODE_WIDTH, io_width_count
+    );
 }
 
 // ============================================================
@@ -2203,24 +3034,39 @@ async fn test_group_io_nodes_render_compact() {
 
 #[wasm_bindgen_test]
 fn test_port_offset_exact_coordinates() {
-    use nodegraph_core::layout::{HEADER_HEIGHT, PORT_HEIGHT, NODE_MIN_WIDTH};
+    use nodegraph_core::layout::{HEADER_HEIGHT, NODE_MIN_WIDTH, PORT_HEIGHT};
 
     // Two-node graph: Source at (100,100), Target at (400,100)
     let (gs, _n1, _n2, out, inp) = new_two_node_graph();
 
     // Output port on Source: x = node_x + NODE_MIN_WIDTH, y = node_y + HEADER_HEIGHT + 0.5 * PORT_HEIGHT
     let out_pos = gs.port_world_pos(out).unwrap();
-    assert!((out_pos.x - (100.0 + NODE_MIN_WIDTH)).abs() < 0.01,
-        "Output port x={} should be {} (node_x + NODE_MIN_WIDTH)", out_pos.x, 100.0 + NODE_MIN_WIDTH);
-    assert!((out_pos.y - (100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT)).abs() < 0.01,
-        "Output port y={} should be {} (node_y + HEADER_HEIGHT + 0.5*PORT_HEIGHT)", out_pos.y, 100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT);
+    assert!(
+        (out_pos.x - (100.0 + NODE_MIN_WIDTH)).abs() < 0.01,
+        "Output port x={} should be {} (node_x + NODE_MIN_WIDTH)",
+        out_pos.x,
+        100.0 + NODE_MIN_WIDTH
+    );
+    assert!(
+        (out_pos.y - (100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT)).abs() < 0.01,
+        "Output port y={} should be {} (node_y + HEADER_HEIGHT + 0.5*PORT_HEIGHT)",
+        out_pos.y,
+        100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT
+    );
 
     // Input port on Target: x = node_x (left edge), same y formula
     let inp_pos = gs.port_world_pos(inp).unwrap();
-    assert!((inp_pos.x - 400.0).abs() < 0.01,
-        "Input port x={} should be 400.0 (node_x)", inp_pos.x);
-    assert!((inp_pos.y - (100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT)).abs() < 0.01,
-        "Input port y={} should be {}", inp_pos.y, 100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT);
+    assert!(
+        (inp_pos.x - 400.0).abs() < 0.01,
+        "Input port x={} should be 400.0 (node_x)",
+        inp_pos.x
+    );
+    assert!(
+        (inp_pos.y - (100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT)).abs() < 0.01,
+        "Input port y={} should be {}",
+        inp_pos.y,
+        100.0 + HEADER_HEIGHT + 0.5 * PORT_HEIGHT
+    );
 }
 
 #[wasm_bindgen_test]
@@ -2230,9 +3076,19 @@ fn test_reroute_port_offset_exact() {
     let (gs, _, _, _, _) = new_two_node_graph();
     register_test_types(&gs);
     gs.registry.borrow_mut().register(NodeTypeDefinition {
-        type_id: "reroute".into(), display_name: "Reroute".into(), category: "Utility".into(),
-        input_ports: vec![PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Any, label: "".into() }],
-        output_ports: vec![PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Any, label: "".into() }],
+        type_id: "reroute".into(),
+        display_name: "Reroute".into(),
+        category: "Utility".into(),
+        input_ports: vec![PortDefinition {
+            direction: PortDirection::Input,
+            socket_type: SocketType::Any,
+            label: "".into(),
+        }],
+        output_ports: vec![PortDefinition {
+            direction: PortDirection::Output,
+            socket_type: SocketType::Any,
+            label: "".into(),
+        }],
     });
     let _tc = render_sync(&gs);
 
@@ -2240,10 +3096,23 @@ fn test_reroute_port_offset_exact() {
 
     // Find reroute ports
     let (r_input, r_output) = gs.with_graph(|g| {
-        let reroute_id = g.world.query::<nodegraph_core::graph::reroute::IsReroute>().next().unwrap().0;
+        let reroute_id = g
+            .world
+            .query::<nodegraph_core::graph::reroute::IsReroute>()
+            .next()
+            .unwrap()
+            .0;
         let ports = g.node_ports(reroute_id).to_vec();
-        let inp = ports.iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input)).copied().unwrap();
-        let out = ports.iter().find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output)).copied().unwrap();
+        let inp = ports
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Input))
+            .copied()
+            .unwrap();
+        let out = ports
+            .iter()
+            .find(|&&p| g.world.get::<PortDirection>(p) == Some(&PortDirection::Output))
+            .copied()
+            .unwrap();
         (inp, out)
     });
 
@@ -2251,14 +3120,28 @@ fn test_reroute_port_offset_exact() {
     let out_pos = gs.port_world_pos(r_output).unwrap();
 
     // Reroute at (200, 200): input at (200 - REROUTE_SIZE, 200), output at (200 + REROUTE_SIZE, 200)
-    assert!((inp_pos.x - (200.0 - REROUTE_SIZE)).abs() < 0.01,
-        "Reroute input x={} should be {}", inp_pos.x, 200.0 - REROUTE_SIZE);
-    assert!((inp_pos.y - 200.0).abs() < 0.01,
-        "Reroute input y={} should be 200.0", inp_pos.y);
-    assert!((out_pos.x - (200.0 + REROUTE_SIZE)).abs() < 0.01,
-        "Reroute output x={} should be {}", out_pos.x, 200.0 + REROUTE_SIZE);
-    assert!((out_pos.y - 200.0).abs() < 0.01,
-        "Reroute output y={} should be 200.0", out_pos.y);
+    assert!(
+        (inp_pos.x - (200.0 - REROUTE_SIZE)).abs() < 0.01,
+        "Reroute input x={} should be {}",
+        inp_pos.x,
+        200.0 - REROUTE_SIZE
+    );
+    assert!(
+        (inp_pos.y - 200.0).abs() < 0.01,
+        "Reroute input y={} should be 200.0",
+        inp_pos.y
+    );
+    assert!(
+        (out_pos.x - (200.0 + REROUTE_SIZE)).abs() < 0.01,
+        "Reroute output x={} should be {}",
+        out_pos.x,
+        200.0 + REROUTE_SIZE
+    );
+    assert!(
+        (out_pos.y - 200.0).abs() < 0.01,
+        "Reroute output y={} should be 200.0",
+        out_pos.y
+    );
 }
 
 #[wasm_bindgen_test]
@@ -2278,13 +3161,29 @@ fn test_frame_undo_redo_cycle() {
 
     // undo → redo → undo → redo cycle
     gs.undo();
-    assert_eq!(gs.with_graph(|g| g.frame_count()), 0, "After undo: no frames");
+    assert_eq!(
+        gs.with_graph(|g| g.frame_count()),
+        0,
+        "After undo: no frames"
+    );
     gs.redo();
-    assert_eq!(gs.with_graph(|g| g.frame_count()), 1, "After redo: frame back");
+    assert_eq!(
+        gs.with_graph(|g| g.frame_count()),
+        1,
+        "After redo: frame back"
+    );
     gs.undo();
-    assert_eq!(gs.with_graph(|g| g.frame_count()), 0, "After 2nd undo: no frames");
+    assert_eq!(
+        gs.with_graph(|g| g.frame_count()),
+        0,
+        "After 2nd undo: no frames"
+    );
     gs.redo();
-    assert_eq!(gs.with_graph(|g| g.frame_count()), 1, "After 2nd redo: frame back");
+    assert_eq!(
+        gs.with_graph(|g| g.frame_count()),
+        1,
+        "After 2nd redo: frame back"
+    );
     assert_eq!(gs.node_count(), 2, "Nodes intact after undo/redo cycle");
 }
 
@@ -2294,27 +3193,51 @@ fn test_connect_through_two_reroutes() {
     let _tc = render_sync(&gs);
 
     // Source(Float out) → R1(Any) → R2(Any) → Sink(Float in)
-    let (src, _) = gs.add_node("Src", (0.0, 0.0), vec![
-        (PortDirection::Output, SocketType::Float, "Out".to_string()),
-    ]);
-    let (r1, _) = gs.add_node("R1", (100.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Any, "".to_string()),
-        (PortDirection::Output, SocketType::Any, "".to_string()),
-    ]);
-    gs.with_graph_mut(|g| g.world.insert(r1, nodegraph_core::graph::reroute::IsReroute));
-    let (r2, _) = gs.add_node("R2", (200.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Any, "".to_string()),
-        (PortDirection::Output, SocketType::Any, "".to_string()),
-    ]);
-    gs.with_graph_mut(|g| g.world.insert(r2, nodegraph_core::graph::reroute::IsReroute));
-    let (sink, _) = gs.add_node("Sink", (300.0, 0.0), vec![
-        (PortDirection::Input, SocketType::Float, "In".to_string()),
-    ]);
+    let (src, _) = gs.add_node(
+        "Src",
+        (0.0, 0.0),
+        vec![(PortDirection::Output, SocketType::Float, "Out".to_string())],
+    );
+    let (r1, _) = gs.add_node(
+        "R1",
+        (100.0, 0.0),
+        vec![
+            (PortDirection::Input, SocketType::Any, "".to_string()),
+            (PortDirection::Output, SocketType::Any, "".to_string()),
+        ],
+    );
+    gs.with_graph_mut(|g| {
+        g.world
+            .insert(r1, nodegraph_core::graph::reroute::IsReroute)
+    });
+    let (r2, _) = gs.add_node(
+        "R2",
+        (200.0, 0.0),
+        vec![
+            (PortDirection::Input, SocketType::Any, "".to_string()),
+            (PortDirection::Output, SocketType::Any, "".to_string()),
+        ],
+    );
+    gs.with_graph_mut(|g| {
+        g.world
+            .insert(r2, nodegraph_core::graph::reroute::IsReroute)
+    });
+    let (sink, _) = gs.add_node(
+        "Sink",
+        (300.0, 0.0),
+        vec![(PortDirection::Input, SocketType::Float, "In".to_string())],
+    );
 
     // Get ports
     let (src_out, r1_in, r1_out, r2_in, r2_out, sink_in) = gs.with_graph(|g| {
-        (g.node_ports(src)[0], g.node_ports(r1)[0], g.node_ports(r1)[1],
-         g.node_ports(r2)[0], g.node_ports(r2)[1], g.node_ports(sink)[0])
+        (
+            g.node_ports(src)[0],
+            g.node_ports(r1)[0],
+            g.node_ports(r1)[1],
+            g.node_ports(r2)[0],
+            g.node_ports(r2)[1],
+            g.node_ports(sink)[0],
+        )
     });
 
     // Connect chain
@@ -2322,32 +3245,51 @@ fn test_connect_through_two_reroutes() {
     gs.connect_ports(r1_out, r2_in).unwrap();
     gs.connect_ports(r2_out, sink_in).unwrap();
 
-    assert_eq!(gs.with_graph(|g| g.connection_count()), 3, "Should have 3 connections");
+    assert_eq!(
+        gs.with_graph(|g| g.connection_count()),
+        3,
+        "Should have 3 connections"
+    );
     assert_eq!(gs.node_count(), 4);
 
     // Delete R1 — should remove its 2 connections
     gs.select_single(r1);
     gs.delete_selected();
     assert_eq!(gs.node_count(), 3, "R1 removed");
-    assert_eq!(gs.with_graph(|g| g.connection_count()), 2, "Auto-reconnected: Src→R2 + R2→Sink");
+    assert_eq!(
+        gs.with_graph(|g| g.connection_count()),
+        2,
+        "Auto-reconnected: Src→R2 + R2→Sink"
+    );
 
     // Undo
     gs.undo();
     assert_eq!(gs.node_count(), 4, "R1 restored");
-    assert_eq!(gs.with_graph(|g| g.connection_count()), 3, "All connections restored");
+    assert_eq!(
+        gs.with_graph(|g| g.connection_count()),
+        3,
+        "All connections restored"
+    );
 }
 
 #[wasm_bindgen_test]
 async fn test_collapsed_node_hides_ports_in_dom() {
     // Create a graph with one collapsed node — it should render without port circles
     let gs = GraphSignals::new();
-    let (n, _) = gs.add_node("Collapsed", (100.0, 100.0), vec![
-        (PortDirection::Input, SocketType::Float, "A".to_string()),
-        (PortDirection::Output, SocketType::Float, "B".to_string()),
-    ]);
+    let (n, _) = gs.add_node(
+        "Collapsed",
+        (100.0, 100.0),
+        vec![
+            (PortDirection::Input, SocketType::Float, "A".to_string()),
+            (PortDirection::Output, SocketType::Float, "B".to_string()),
+        ],
+    );
     // Collapse before rendering — update both graph and signal
     gs.with_graph_mut(|g| {
-        if let Some(h) = g.world.get_mut::<nodegraph_core::graph::node::NodeHeader>(n) {
+        if let Some(h) = g
+            .world
+            .get_mut::<nodegraph_core::graph::node::NodeHeader>(n)
+        {
             h.collapsed = true;
         }
     });
@@ -2366,7 +3308,12 @@ async fn test_collapsed_node_hides_ports_in_dom() {
     let doc = web_sys::window().unwrap().document().unwrap();
     let node_group = doc.query_selector("[data-node-id]").unwrap().unwrap();
     let ports = node_group.query_selector_all("[data-port-id]").unwrap();
-    assert_eq!(ports.length(), 0, "Collapsed node should have 0 port circles, got {}", ports.length());
+    assert_eq!(
+        ports.length(),
+        0,
+        "Collapsed node should have 0 port circles, got {}",
+        ports.length()
+    );
 }
 
 // ============================================================
@@ -2416,11 +3363,18 @@ async fn test_frame_title_renders_in_dom() {
 #[wasm_bindgen_test]
 async fn test_reroute_renders_diamond_polygon() {
     let gs = GraphSignals::new();
-    let (reroute, _) = gs.add_node("", (100.0, 100.0), vec![
-        (PortDirection::Input, SocketType::Any, "".to_string()),
-        (PortDirection::Output, SocketType::Any, "".to_string()),
-    ]);
-    gs.with_graph_mut(|g| g.world.insert(reroute, nodegraph_core::graph::reroute::IsReroute));
+    let (reroute, _) = gs.add_node(
+        "",
+        (100.0, 100.0),
+        vec![
+            (PortDirection::Input, SocketType::Any, "".to_string()),
+            (PortDirection::Output, SocketType::Any, "".to_string()),
+        ],
+    );
+    gs.with_graph_mut(|g| {
+        g.world
+            .insert(reroute, nodegraph_core::graph::reroute::IsReroute)
+    });
 
     let _tc = render_sync(&gs);
     let promise = js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL);
@@ -2434,14 +3388,21 @@ async fn test_reroute_renders_diamond_polygon() {
     let node_group = node_group.unwrap();
 
     let polygons = node_group.query_selector_all("polygon").unwrap();
-    assert!(polygons.length() >= 2, "Reroute should have at least 2 polygons (fill + highlight), got {}", polygons.length());
+    assert!(
+        polygons.length() >= 2,
+        "Reroute should have at least 2 polygons (fill + highlight), got {}",
+        polygons.length()
+    );
 
     // Check diamond points match REROUTE_SIZE = 10
     if let Some(poly) = polygons.get(0) {
         if let Ok(el) = poly.dyn_into::<web_sys::Element>() {
             let points = el.get_attribute("points").unwrap_or_default();
-            assert_eq!(points, "10,0 0,10 -10,0 0,-10",
-                "Diamond points should match REROUTE_SIZE=10, got '{}'", points);
+            assert_eq!(
+                points, "10,0 0,10 -10,0 0,-10",
+                "Diamond points should match REROUTE_SIZE=10, got '{}'",
+                points
+            );
         }
     }
 

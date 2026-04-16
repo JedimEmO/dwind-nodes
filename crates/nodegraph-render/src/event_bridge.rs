@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use dominator::events;
-use nodegraph_core::interaction::{InputEvent, MouseButton, Modifiers};
+use nodegraph_core::interaction::{InputEvent, Modifiers, MouseButton};
 use nodegraph_core::layout::Vec2;
 
 use crate::graph_signals::GraphSignals;
@@ -22,10 +22,7 @@ pub fn on_mouse_down(gs: &Rc<GraphSignals>, e: events::MouseDown, container_rect
     );
     let (pan_x, pan_y) = gs.pan.get();
     let zoom = gs.zoom.get();
-    let world = Vec2::new(
-        (screen.x - pan_x) / zoom,
-        (screen.y - pan_y) / zoom,
-    );
+    let world = Vec2::new((screen.x - pan_x) / zoom, (screen.y - pan_y) / zoom);
     gs.handle_input(InputEvent::MouseDown {
         screen,
         world,
@@ -45,10 +42,7 @@ pub fn on_mouse_move(gs: &Rc<GraphSignals>, e: events::MouseMove, container_rect
     );
     let (pan_x, pan_y) = gs.pan.get();
     let zoom = gs.zoom.get();
-    let world = Vec2::new(
-        (screen.x - pan_x) / zoom,
-        (screen.y - pan_y) / zoom,
-    );
+    let world = Vec2::new((screen.x - pan_x) / zoom, (screen.y - pan_y) / zoom);
     gs.cursor_world.set((world.x, world.y));
     gs.handle_input(InputEvent::MouseMove {
         screen,
@@ -68,10 +62,7 @@ pub fn on_mouse_up(gs: &Rc<GraphSignals>, e: events::MouseUp, container_rect: (f
     );
     let (pan_x, pan_y) = gs.pan.get();
     let zoom = gs.zoom.get();
-    let world = Vec2::new(
-        (screen.x - pan_x) / zoom,
-        (screen.y - pan_y) / zoom,
-    );
+    let world = Vec2::new((screen.x - pan_x) / zoom, (screen.y - pan_y) / zoom);
     gs.handle_input(InputEvent::MouseUp {
         screen,
         world,

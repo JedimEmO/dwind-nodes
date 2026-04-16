@@ -1,20 +1,20 @@
-use std::rc::Rc;
 use std::cell::Cell;
+use std::rc::Rc;
 
-use wasm_bindgen::JsCast;
-use dominator::{html, svg, Dom, clone, events, EventOptions};
+use dominator::{clone, events, html, svg, Dom, EventOptions};
+use futures_signals::map_ref;
 use futures_signals::signal::SignalExt;
 use futures_signals::signal_vec::SignalVecExt;
-use futures_signals::map_ref;
+use wasm_bindgen::JsCast;
 
-use crate::graph_signals::{GraphSignals, ATTR_VIEWPORT_INNER};
-use crate::node_view::render_node;
-use crate::connection_view::{render_connection, render_preview_wire, render_cut_line};
-use crate::frame_view::render_frame;
-use crate::search_menu::render_search_menu;
-use crate::minimap_view::render_minimap;
+use crate::connection_view::{render_connection, render_cut_line, render_preview_wire};
 use crate::context_menu::render_context_menu;
 use crate::event_bridge;
+use crate::frame_view::render_frame;
+use crate::graph_signals::{GraphSignals, ATTR_VIEWPORT_INNER};
+use crate::minimap_view::render_minimap;
+use crate::node_view::render_node;
+use crate::search_menu::render_search_menu;
 
 /// Render a complete node graph editor as a DOM element.
 ///
@@ -297,7 +297,7 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                     ("Ctrl+RMB drag", "Cut links"),
                     ("Right-click", "Context menu"),
                     ("?", "Toggle this help"),
-                ].into_iter().map(|(key, desc)| {
+                ].into_iter().flat_map(|(key, desc)| {
                     vec![
                         html!("span", {
                             .style("color", gs.theme.selection_highlight)
@@ -308,7 +308,7 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                         }),
                         html!("span", { .text(desc) }),
                     ]
-                }).flatten().collect::<Vec<_>>())
+                }).collect::<Vec<_>>())
             }))
 
             .child(html!("div", {

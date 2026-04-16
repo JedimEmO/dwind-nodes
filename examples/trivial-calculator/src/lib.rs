@@ -9,15 +9,17 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use wasm_bindgen::prelude::*;
-use dominator::{html, clone};
+use dominator::{clone, html};
 use futures_signals::signal::{Mutable, SignalExt};
 use futures_signals::signal_vec::SignalVecExt;
+use wasm_bindgen::prelude::*;
 
-use nodegraph_core::{EntityId, NodeHeader, PortDirection, SocketType, NodeTypeDefinition, PortDefinition};
-use nodegraph_core::graph::port::PortOwner;
 use nodegraph_core::graph::connection::ConnectionEndpoints;
-use nodegraph_render::{GraphSignals, render_graph_editor};
+use nodegraph_core::graph::port::PortOwner;
+use nodegraph_core::{
+    EntityId, NodeHeader, NodeTypeDefinition, PortDefinition, PortDirection, SocketType,
+};
+use nodegraph_render::{render_graph_editor, GraphSignals};
 use nodegraph_widgets::float_input::{float_input, FloatInputProps};
 
 // ============================================================
@@ -27,7 +29,8 @@ use nodegraph_widgets::float_input::{float_input, FloatInputProps};
 type PortValues = Rc<RefCell<HashMap<EntityId, Mutable<f64>>>>;
 
 fn get_port_value(values: &PortValues, port_id: EntityId, default: f64) -> Mutable<f64> {
-    values.borrow_mut()
+    values
+        .borrow_mut()
         .entry(port_id)
         .or_insert_with(|| Mutable::new(default))
         .clone()
@@ -43,7 +46,9 @@ fn evaluate(gs: &Rc<GraphSignals>, port_values: &PortValues) {
     gs.with_graph(|graph| {
         // Pass 1: Constant nodes — read value from their output port's Mutable
         for (id, header) in graph.world.query::<NodeHeader>() {
-            if header.title != "Constant" { continue; }
+            if header.title != "Constant" {
+                continue;
+            }
             let ports = graph.node_ports(id);
             if let Some(&out_port) = ports.first() {
                 let val = get_port_value(port_values, out_port, 0.0).get();
@@ -52,14 +57,19 @@ fn evaluate(gs: &Rc<GraphSignals>, port_values: &PortValues) {
         }
 
         // Pass 2: Add nodes — sum connected inputs, fall back to port widget value
-        let add_nodes: Vec<EntityId> = graph.world.query::<NodeHeader>()
+        let add_nodes: Vec<EntityId> = graph
+            .world
+            .query::<NodeHeader>()
             .filter(|(_, h)| h.title == "Add")
-            .map(|(id, _)| id).collect();
+            .map(|(id, _)| id)
+            .collect();
 
         for nid in add_nodes {
             let mut sum = 0.0;
             for &pid in graph.node_ports(nid) {
-                if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) { continue; }
+                if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) {
+                    continue;
+                }
 
                 let conns = graph.port_connections(pid);
                 if conns.is_empty() {
@@ -69,8 +79,12 @@ fn evaluate(gs: &Rc<GraphSignals>, port_values: &PortValues) {
                     // Connected — use upstream computed value
                     for &conn_id in conns {
                         if let Some(ep) = graph.world.get::<ConnectionEndpoints>(conn_id) {
-                            if ep.target_port != pid { continue; }
-                            if let Some(src_node) = graph.world.get::<PortOwner>(ep.source_port).map(|o| o.0) {
+                            if ep.target_port != pid {
+                                continue;
+                            }
+                            if let Some(src_node) =
+                                graph.world.get::<PortOwner>(ep.source_port).map(|o| o.0)
+                            {
                                 sum += computed.get(&src_node).copied().unwrap_or(0.0);
                             }
                         }
@@ -81,18 +95,27 @@ fn evaluate(gs: &Rc<GraphSignals>, port_values: &PortValues) {
         }
 
         // Pass 3: Display nodes — take connected input value
-        let display_nodes: Vec<EntityId> = graph.world.query::<NodeHeader>()
+        let display_nodes: Vec<EntityId> = graph
+            .world
+            .query::<NodeHeader>()
             .filter(|(_, h)| h.title == "Display")
-            .map(|(id, _)| id).collect();
+            .map(|(id, _)| id)
+            .collect();
 
         for nid in display_nodes {
             let mut val = 0.0;
             for &pid in graph.node_ports(nid) {
-                if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) { continue; }
+                if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) {
+                    continue;
+                }
                 for &conn_id in graph.port_connections(pid) {
                     if let Some(ep) = graph.world.get::<ConnectionEndpoints>(conn_id) {
-                        if ep.target_port != pid { continue; }
-                        if let Some(src_node) = graph.world.get::<PortOwner>(ep.source_port).map(|o| o.0) {
+                        if ep.target_port != pid {
+                            continue;
+                        }
+                        if let Some(src_node) =
+                            graph.world.get::<PortOwner>(ep.source_port).map(|o| o.0)
+                        {
                             val = computed.get(&src_node).copied().unwrap_or(0.0);
                         }
                     }
@@ -129,48 +152,88 @@ pub fn main() {
             display_name: "Constant".into(),
             category: "Input".into(),
             input_ports: vec![],
-            output_ports: vec![
-                PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Float, label: "Value".into() },
-            ],
+            output_ports: vec![PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Float,
+                label: "Value".into(),
+            }],
         });
         reg.register(NodeTypeDefinition {
             type_id: "add".into(),
             display_name: "Add".into(),
             category: "Math".into(),
             input_ports: vec![
-                PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "A".into() },
-                PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "B".into() },
+                PortDefinition {
+                    direction: PortDirection::Input,
+                    socket_type: SocketType::Float,
+                    label: "A".into(),
+                },
+                PortDefinition {
+                    direction: PortDirection::Input,
+                    socket_type: SocketType::Float,
+                    label: "B".into(),
+                },
             ],
-            output_ports: vec![
-                PortDefinition { direction: PortDirection::Output, socket_type: SocketType::Float, label: "Result".into() },
-            ],
+            output_ports: vec![PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: SocketType::Float,
+                label: "Result".into(),
+            }],
         });
         reg.register(NodeTypeDefinition {
             type_id: "display".into(),
             display_name: "Display".into(),
             category: "Output".into(),
-            input_ports: vec![
-                PortDefinition { direction: PortDirection::Input, socket_type: SocketType::Float, label: "Value".into() },
-            ],
+            input_ports: vec![PortDefinition {
+                direction: PortDirection::Input,
+                socket_type: SocketType::Float,
+                label: "Value".into(),
+            }],
             output_ports: vec![],
         });
     }
 
     // Add nodes
-    let (_, const_a_ports) = gs.add_node_typed("Constant", Some("constant"), (50.0, 50.0), vec![
-        (PortDirection::Output, SocketType::Float, "Value".to_string()),
-    ]);
-    let (_, const_b_ports) = gs.add_node_typed("Constant", Some("constant"), (50.0, 200.0), vec![
-        (PortDirection::Output, SocketType::Float, "Value".to_string()),
-    ]);
-    let (_, add_ports) = gs.add_node_typed("Add", Some("add"), (300.0, 100.0), vec![
-        (PortDirection::Input, SocketType::Float, "A".to_string()),
-        (PortDirection::Input, SocketType::Float, "B".to_string()),
-        (PortDirection::Output, SocketType::Float, "Result".to_string()),
-    ]);
-    let (_, display_ports) = gs.add_node_typed("Display", Some("display"), (550.0, 100.0), vec![
-        (PortDirection::Input, SocketType::Float, "Value".to_string()),
-    ]);
+    let (_, const_a_ports) = gs.add_node_typed(
+        "Constant",
+        Some("constant"),
+        (50.0, 50.0),
+        vec![(
+            PortDirection::Output,
+            SocketType::Float,
+            "Value".to_string(),
+        )],
+    );
+    let (_, const_b_ports) = gs.add_node_typed(
+        "Constant",
+        Some("constant"),
+        (50.0, 200.0),
+        vec![(
+            PortDirection::Output,
+            SocketType::Float,
+            "Value".to_string(),
+        )],
+    );
+    let (_, add_ports) = gs.add_node_typed(
+        "Add",
+        Some("add"),
+        (300.0, 100.0),
+        vec![
+            (PortDirection::Input, SocketType::Float, "A".to_string()),
+            (PortDirection::Input, SocketType::Float, "B".to_string()),
+            (
+                PortDirection::Output,
+                SocketType::Float,
+                "Result".to_string(),
+            ),
+        ],
+    );
+    let (_, display_ports) = gs.add_node_typed(
+        "Display",
+        Some("display"),
+        (550.0, 100.0),
+        vec![(PortDirection::Input, SocketType::Float, "Value".to_string())],
+    );
 
     // Set initial constant values
     get_port_value(&port_values, const_a_ports[0], 0.0).set(42.0);
@@ -184,19 +247,23 @@ pub fn main() {
     // Port widget callback — renders float_input on Float ports
     {
         let pv = port_values.clone();
-        gs.port_widget.borrow_mut().replace(Rc::new(move |_node_id, port_id, socket_type, port_dir, type_id, is_connected, _gs| {
-            if socket_type != SocketType::Float { return None; }
-            match (type_id, port_dir) {
-                ("constant", PortDirection::Output) => {} // Always editable
-                ("display", _) => return None,            // Display never gets widgets
-                (_, PortDirection::Input) if !is_connected => {} // Disconnected inputs get widgets
-                _ => return None,
-            }
-            let mutable = get_port_value(&pv, port_id, 0.0);
-            Some(float_input(FloatInputProps::new()
-                .value(Box::new(mutable) as Box<dyn nodegraph_widgets::FloatValueWrapper>)
-            ))
-        }));
+        gs.port_widget.borrow_mut().replace(Rc::new(
+            move |_node_id, port_id, socket_type, port_dir, type_id, is_connected, _gs| {
+                if socket_type != SocketType::Float {
+                    return None;
+                }
+                match (type_id, port_dir) {
+                    ("constant", PortDirection::Output) => {} // Always editable
+                    ("display", _) => return None,            // Display never gets widgets
+                    (_, PortDirection::Input) if !is_connected => {} // Disconnected inputs get widgets
+                    _ => return None,
+                }
+                let mutable = get_port_value(&pv, port_id, 0.0);
+                Some(float_input(FloatInputProps::new().value(
+                    Box::new(mutable) as Box<dyn nodegraph_widgets::FloatValueWrapper>
+                )))
+            },
+        ));
     }
 
     // Custom node body — shows computed result
@@ -259,99 +326,111 @@ pub fn main() {
     // Initial evaluation
     evaluate(&gs, &port_values);
 
-    // Re-evaluate on connection changes via event callbacks
+    // Re-evaluate whenever graph structure changes — subscribe to the
+    // `node_list` + `connection_list` MutableVecs rather than registering
+    // connect/disconnect callbacks. This is the idiomatic dominator /
+    // futures-signals pattern: observable state drives reactive work.
     {
         let pv = port_values.clone();
         let gs2 = gs.clone();
-        *gs.on_connect.borrow_mut() = Some(Box::new(move |_, _, _| { evaluate(&gs2, &pv); }));
-    }
-    {
-        let pv = port_values.clone();
-        let gs2 = gs.clone();
-        *gs.on_disconnect.borrow_mut() = Some(Box::new(move |_| { evaluate(&gs2, &pv); }));
+        wasm_bindgen_futures::spawn_local(async move {
+            gs2.structure_changes_signal()
+                .for_each(move |_| {
+                    evaluate(&gs2, &pv);
+                    async {}
+                })
+                .await;
+        });
     }
 
     // Re-evaluate when any port value changes (user edits a Constant or Add default)
     {
         let pv = port_values.clone();
         let all_ports: Vec<EntityId> = gs.with_graph(|g| {
-            g.world.query::<NodeHeader>().flat_map(|(nid, _)| g.node_ports(nid).to_vec()).collect()
+            g.world
+                .query::<NodeHeader>()
+                .flat_map(|(nid, _)| g.node_ports(nid).to_vec())
+                .collect()
         });
         for port_id in all_ports {
             let pv = pv.clone();
             let gs = gs.clone();
             let mutable = get_port_value(&pv, port_id, 0.0);
             wasm_bindgen_futures::spawn_local(async move {
-                mutable.signal().for_each(move |_| {
-                    evaluate(&gs, &pv);
-                    async {}
-                }).await;
+                mutable
+                    .signal()
+                    .for_each(move |_| {
+                        evaluate(&gs, &pv);
+                        async {}
+                    })
+                    .await;
             });
         }
     }
 
     // Layout: side-by-side — graph editor on left, JSON panel on right
-    dominator::append_dom(&dominator::body(), html!("div", {
-        .style("display", "flex")
-        .style("width", "100%")
-        .style("height", "100%")
-
-        // Graph editor — takes remaining space
-        .child(html!("div", {
-            .style("flex", "1")
-            .style("min-width", "0")
-            .style("height", "100%")
-            .child(render_graph_editor(gs.clone()))
-        }))
-
-        // JSON panel — fixed width docked on right
-        .child(html!("div", {
-            .style("width", "320px")
-            .style("flex-shrink", "0")
-            .style("height", "100%")
-            .style("background", "#12121f")
-            .style("border-left", "1px solid #333")
+    dominator::append_dom(
+        &dominator::body(),
+        html!("div", {
             .style("display", "flex")
-            .style("flex-direction", "column")
-            .style("font-family", "monospace")
+            .style("width", "100%")
+            .style("height", "100%")
 
-            // Header
+            // Graph editor — takes remaining space
             .child(html!("div", {
-                .style("padding", "8px 12px")
-                .style("font-size", "11px")
-                .style("font-weight", "bold")
-                .style("color", "#888")
-                .style("border-bottom", "1px solid #333")
-                .style("flex-shrink", "0")
-                .text("Serialized Graph (live)")
+                .style("flex", "1")
+                .style("min-width", "0")
+                .style("height", "100%")
+                .child(render_graph_editor(gs.clone()))
             }))
 
-            // JSON content — reactive over both node_list and connection_list
-            .child(html!("pre", {
-                .style("flex", "1")
-                .style("margin", "0")
-                .style("padding", "8px 12px")
-                .style("overflow-y", "auto")
-                .style("color", "#8f8")
-                .style("font-size", "10px")
-                .style("line-height", "1.4")
-                .style("white-space", "pre-wrap")
-                .style("word-break", "break-all")
-                .text_signal(
-                    futures_signals::map_ref! {
-                        let _nodes = gs.node_list.signal_vec_cloned().to_signal_cloned(),
-                        let _conns = gs.connection_list.signal_vec_cloned().to_signal_cloned(),
-                        let _bounds = gs.graph_bounds.signal() => {
-                            ()
-                        }
-                    }.map(clone!(gs => move |_| {
-                        gs.with_graph(|g| {
-                            let serialized = g.serialize();
-                            serde_json::to_string_pretty(&serialized).unwrap_or_default()
-                        })
-                    }))
-                )
+            // JSON panel — fixed width docked on right
+            .child(html!("div", {
+                .style("width", "320px")
+                .style("flex-shrink", "0")
+                .style("height", "100%")
+                .style("background", "#12121f")
+                .style("border-left", "1px solid #333")
+                .style("display", "flex")
+                .style("flex-direction", "column")
+                .style("font-family", "monospace")
+
+                // Header
+                .child(html!("div", {
+                    .style("padding", "8px 12px")
+                    .style("font-size", "11px")
+                    .style("font-weight", "bold")
+                    .style("color", "#888")
+                    .style("border-bottom", "1px solid #333")
+                    .style("flex-shrink", "0")
+                    .text("Serialized Graph (live)")
+                }))
+
+                // JSON content — reactive over both node_list and connection_list
+                .child(html!("pre", {
+                    .style("flex", "1")
+                    .style("margin", "0")
+                    .style("padding", "8px 12px")
+                    .style("overflow-y", "auto")
+                    .style("color", "#8f8")
+                    .style("font-size", "10px")
+                    .style("line-height", "1.4")
+                    .style("white-space", "pre-wrap")
+                    .style("word-break", "break-all")
+                    .text_signal(
+                        futures_signals::map_ref! {
+                            let _nodes = gs.node_list.signal_vec_cloned().to_signal_cloned(),
+                            let _conns = gs.connection_list.signal_vec_cloned().to_signal_cloned(),
+                            let _bounds = gs.graph_bounds.signal() => {}
+                        }.map(clone!(gs => move |_| {
+                            gs.with_graph(|g| {
+                                let serialized = g.serialize();
+                                serde_json::to_string_pretty(&serialized).unwrap_or_default()
+                            })
+                        }))
+                    )
+                }))
             }))
-        }))
-    }));
+        }),
+    );
 }

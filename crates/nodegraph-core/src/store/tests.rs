@@ -1,8 +1,8 @@
 use super::*;
-use crate::graph::NodeGraph;
+use crate::graph::connection::ConnectionEndpoints;
 use crate::graph::node::{NodeHeader, NodePosition};
 use crate::graph::port::{PortDirection, PortSocketType};
-use crate::graph::connection::ConnectionEndpoints;
+use crate::graph::NodeGraph;
 use crate::types::socket_type::SocketType;
 
 // ============================================================
@@ -88,15 +88,15 @@ fn component_crud() {
     let id = world.spawn();
 
     world.insert(id, 42u32);
-    world.insert(id, 3.14f64);
+    world.insert(id, 1.5f64);
     world.insert(id, "hello".to_string());
 
     assert_eq!(world.get::<u32>(id), Some(&42));
-    assert_eq!(world.get::<f64>(id), Some(&3.14));
+    assert_eq!(world.get::<f64>(id), Some(&1.5));
     assert_eq!(world.get::<String>(id), Some(&"hello".to_string()));
 
     let removed = world.remove::<f64>(id);
-    assert_eq!(removed, Some(3.14));
+    assert_eq!(removed, Some(1.5));
 
     assert_eq!(world.get::<f64>(id), None);
     assert_eq!(world.get::<u32>(id), Some(&42));
@@ -158,12 +158,12 @@ fn query_single_component() {
         all_ids.push(world.spawn());
     }
 
-    for i in 0..50 {
-        world.insert(all_ids[i], CompA(i as u32));
+    for (i, &id) in all_ids.iter().enumerate().take(50) {
+        world.insert(id, CompA(i as u32));
     }
 
-    for i in 20..50 {
-        world.insert(all_ids[i], CompB(i as u32));
+    for (i, &id) in all_ids.iter().enumerate().take(50).skip(20) {
+        world.insert(id, CompB(i as u32));
     }
 
     assert_eq!(world.query::<CompA>().count(), 50);
@@ -289,7 +289,10 @@ fn connection_validation_same_direction_fails() {
     let in2 = graph.add_port(node2, PortDirection::Input, SocketType::Float, "In");
 
     let result = graph.connect(in1, in2);
-    assert!(matches!(result, Err(crate::graph::ConnectionError::SameDirection)));
+    assert!(matches!(
+        result,
+        Err(crate::graph::ConnectionError::SameDirection)
+    ));
 }
 
 #[test]
@@ -301,7 +304,10 @@ fn connection_validation_incompatible_types_fails() {
     let inp = graph.add_port(node2, PortDirection::Input, SocketType::Shader, "In");
 
     let result = graph.connect(out, inp);
-    assert!(matches!(result, Err(crate::graph::ConnectionError::IncompatibleTypes(_, _))));
+    assert!(matches!(
+        result,
+        Err(crate::graph::ConnectionError::IncompatibleTypes(_, _))
+    ));
 }
 
 #[test]
@@ -334,7 +340,10 @@ fn connection_validation_same_node_fails() {
     let inp = graph.add_port(node, PortDirection::Input, SocketType::Float, "In");
 
     let result = graph.connect(out, inp);
-    assert!(matches!(result, Err(crate::graph::ConnectionError::SameNode)));
+    assert!(matches!(
+        result,
+        Err(crate::graph::ConnectionError::SameNode)
+    ));
 }
 
 #[test]
@@ -368,9 +377,15 @@ fn connection_to_invalid_port_fails() {
     let out = graph.add_port(node1, PortDirection::Output, SocketType::Float, "Out");
 
     // Fabricate a non-existent port ID
-    let fake_port = EntityId { index: 9999, generation: crate::store::Generation::default() };
+    let fake_port = EntityId {
+        index: 9999,
+        generation: crate::store::Generation::default(),
+    };
     let result = graph.connect(out, fake_port);
-    assert!(matches!(result, Err(crate::graph::ConnectionError::InvalidTargetPort)));
+    assert!(matches!(
+        result,
+        Err(crate::graph::ConnectionError::InvalidTargetPort)
+    ));
 }
 
 // ============================================================
@@ -403,7 +418,8 @@ fn serialization_roundtrip() {
     let json = serde_json::to_string_pretty(&serialized).unwrap();
 
     // Deserialize
-    let deserialized_data: crate::serialization::SerializedGraph = serde_json::from_str(&json).unwrap();
+    let deserialized_data: crate::serialization::SerializedGraph =
+        serde_json::from_str(&json).unwrap();
     let restored = NodeGraph::deserialize(&deserialized_data).unwrap();
 
     // Verify structure
@@ -411,7 +427,11 @@ fn serialization_roundtrip() {
     assert_eq!(restored.connection_count(), 2);
 
     // Verify node titles
-    let headers: Vec<_> = restored.world.query::<NodeHeader>().map(|(_, h)| h.title.clone()).collect();
+    let headers: Vec<_> = restored
+        .world
+        .query::<NodeHeader>()
+        .map(|(_, h)| h.title.clone())
+        .collect();
     assert!(headers.contains(&"Math Add".to_string()));
     assert!(headers.contains(&"Color Mix".to_string()));
     assert!(headers.contains(&"Output".to_string()));
@@ -420,25 +440,46 @@ fn serialization_roundtrip() {
     for (id, header) in restored.world.query::<NodeHeader>() {
         let pos = restored.world.get::<NodePosition>(id).unwrap();
         match header.title.as_str() {
-            "Math Add" => { assert_eq!(pos.x, 10.0); assert_eq!(pos.y, 20.0); }
-            "Color Mix" => { assert_eq!(pos.x, 200.0); assert_eq!(pos.y, 100.0); }
-            "Output" => { assert_eq!(pos.x, 400.0); assert_eq!(pos.y, 50.0); }
+            "Math Add" => {
+                assert_eq!(pos.x, 10.0);
+                assert_eq!(pos.y, 20.0);
+            }
+            "Color Mix" => {
+                assert_eq!(pos.x, 200.0);
+                assert_eq!(pos.y, 100.0);
+            }
+            "Output" => {
+                assert_eq!(pos.x, 400.0);
+                assert_eq!(pos.y, 50.0);
+            }
             _ => panic!("unexpected node"),
         }
     }
 
     // Verify connection endpoints reference correct port types
     for (_, endpoints) in restored.world.query::<ConnectionEndpoints>() {
-        let src_type = restored.world.get::<PortSocketType>(endpoints.source_port).unwrap();
-        let tgt_type = restored.world.get::<PortSocketType>(endpoints.target_port).unwrap();
+        let src_type = restored
+            .world
+            .get::<PortSocketType>(endpoints.source_port)
+            .unwrap();
+        let tgt_type = restored
+            .world
+            .get::<PortSocketType>(endpoints.target_port)
+            .unwrap();
         // All connections in this graph go from Float output or Color output
         assert!(src_type.0.is_compatible_with(&tgt_type.0));
     }
 
     // Verify port directions are correct on connection endpoints
     for (_, endpoints) in restored.world.query::<ConnectionEndpoints>() {
-        let src_dir = restored.world.get::<PortDirection>(endpoints.source_port).unwrap();
-        let tgt_dir = restored.world.get::<PortDirection>(endpoints.target_port).unwrap();
+        let src_dir = restored
+            .world
+            .get::<PortDirection>(endpoints.source_port)
+            .unwrap();
+        let tgt_dir = restored
+            .world
+            .get::<PortDirection>(endpoints.target_port)
+            .unwrap();
         assert_eq!(*src_dir, PortDirection::Output);
         assert_eq!(*tgt_dir, PortDirection::Input);
     }
@@ -467,12 +508,15 @@ fn deserialization_orphaned_connection_returns_error() {
         frames: vec![],
     };
     let result = NodeGraph::deserialize(&data);
-    assert!(matches!(result, Err(crate::serialization::DeserializeError::OrphanedConnection { .. })));
+    assert!(matches!(
+        result,
+        Err(crate::serialization::DeserializeError::OrphanedConnection { .. })
+    ));
 }
 
 #[test]
 fn serialization_roundtrip_frames_and_reroutes() {
-    use crate::graph::frame::{FrameRect, FrameLabel, FrameMembers};
+    use crate::graph::frame::{FrameLabel, FrameMembers, FrameRect};
     use crate::graph::reroute::IsReroute;
 
     let mut graph = NodeGraph::new();
@@ -498,15 +542,26 @@ fn serialization_roundtrip_frames_and_reroutes() {
 
     // Verify reroute marker survived
     let reroute_count = restored.world.query::<IsReroute>().count();
-    assert_eq!(reroute_count, 1, "IsReroute should survive serialization roundtrip");
+    assert_eq!(
+        reroute_count, 1,
+        "IsReroute should survive serialization roundtrip"
+    );
 
     // Verify frame survived
-    assert_eq!(restored.frame_count(), 1, "Frame should survive serialization roundtrip");
+    assert_eq!(
+        restored.frame_count(),
+        1,
+        "Frame should survive serialization roundtrip"
+    );
     let (fid, _) = restored.world.query::<FrameRect>().next().unwrap();
     let label = restored.world.get::<FrameLabel>(fid).unwrap();
     assert_eq!(label.0, "My Frame");
     let members = restored.world.get::<FrameMembers>(fid).unwrap();
-    assert_eq!(members.0.len(), 2, "Frame should have 2 members after roundtrip");
+    assert_eq!(
+        members.0.len(),
+        2,
+        "Frame should have 2 members after roundtrip"
+    );
 }
 
 #[test]
@@ -517,12 +572,20 @@ fn serialization_roundtrip_with_subgraphs() {
 
     // Build A → B → C chain in root
     let a = ge.current_graph_mut().add_node("A", (0.0, 0.0));
-    let a_out = ge.current_graph_mut().add_port(a, PortDirection::Output, SocketType::Float, "Out");
+    let a_out = ge
+        .current_graph_mut()
+        .add_port(a, PortDirection::Output, SocketType::Float, "Out");
     let b = ge.current_graph_mut().add_node("B", (200.0, 0.0));
-    let b_in = ge.current_graph_mut().add_port(b, PortDirection::Input, SocketType::Float, "In");
-    let b_out = ge.current_graph_mut().add_port(b, PortDirection::Output, SocketType::Float, "Out");
+    let b_in = ge
+        .current_graph_mut()
+        .add_port(b, PortDirection::Input, SocketType::Float, "In");
+    let b_out = ge
+        .current_graph_mut()
+        .add_port(b, PortDirection::Output, SocketType::Float, "Out");
     let c = ge.current_graph_mut().add_node("C", (400.0, 0.0));
-    let c_in = ge.current_graph_mut().add_port(c, PortDirection::Input, SocketType::Float, "In");
+    let c_in = ge
+        .current_graph_mut()
+        .add_port(c, PortDirection::Input, SocketType::Float, "In");
     ge.current_graph_mut().connect(a_out, b_in).unwrap();
     ge.current_graph_mut().connect(b_out, c_in).unwrap();
 
@@ -532,12 +595,17 @@ fn serialization_roundtrip_with_subgraphs() {
     // Serialize root graph
     let root_serialized = ge.current_graph().serialize();
     let root_json = serde_json::to_string(&root_serialized).unwrap();
-    let root_data: crate::serialization::SerializedGraph = serde_json::from_str(&root_json).unwrap();
+    let root_data: crate::serialization::SerializedGraph =
+        serde_json::from_str(&root_json).unwrap();
     let root_restored = NodeGraph::deserialize(&root_data).unwrap();
 
     // Root should have A, C, Group (3 nodes), 2 connections
     assert_eq!(root_restored.node_count(), 3, "Root roundtrip: 3 nodes");
-    assert_eq!(root_restored.connection_count(), 2, "Root roundtrip: 2 connections");
+    assert_eq!(
+        root_restored.connection_count(),
+        2,
+        "Root roundtrip: 2 connections"
+    );
 
     // Serialize subgraph
     ge.enter_group(group_node);
@@ -547,31 +615,54 @@ fn serialization_roundtrip_with_subgraphs() {
     let sub_restored = NodeGraph::deserialize(&sub_data).unwrap();
 
     // Subgraph should have IO nodes + B, with connections
-    assert!(sub_restored.node_count() >= 2, "Subgraph roundtrip: at least B + IO nodes, got {}", sub_restored.node_count());
-    assert!(sub_restored.connection_count() >= 1, "Subgraph roundtrip: at least 1 connection, got {}", sub_restored.connection_count());
+    assert!(
+        sub_restored.node_count() >= 2,
+        "Subgraph roundtrip: at least B + IO nodes, got {}",
+        sub_restored.node_count()
+    );
+    assert!(
+        sub_restored.connection_count() >= 1,
+        "Subgraph roundtrip: at least 1 connection, got {}",
+        sub_restored.connection_count()
+    );
 
     // Verify node titles survived
-    let titles: Vec<String> = sub_restored.world.query::<NodeHeader>()
-        .map(|(_, h)| h.title.clone()).collect();
-    assert!(titles.iter().any(|t| t == "B"), "Subgraph should contain node B after roundtrip, got {:?}", titles);
+    let titles: Vec<String> = sub_restored
+        .world
+        .query::<NodeHeader>()
+        .map(|(_, h)| h.title.clone())
+        .collect();
+    assert!(
+        titles.iter().any(|t| t == "B"),
+        "Subgraph should contain node B after roundtrip, got {:?}",
+        titles
+    );
 }
 
 #[test]
 fn graph_editor_full_roundtrip() {
+    use crate::graph::group::SubgraphRoot;
     use crate::graph::GraphEditor;
     use crate::graph::GroupIOKind;
-    use crate::graph::group::SubgraphRoot;
 
     let mut ge = GraphEditor::new();
 
     // Build A → B → C chain
     let a = ge.current_graph_mut().add_node("A", (0.0, 0.0));
-    let a_out = ge.current_graph_mut().add_port(a, PortDirection::Output, SocketType::Float, "Out");
+    let a_out = ge
+        .current_graph_mut()
+        .add_port(a, PortDirection::Output, SocketType::Float, "Out");
     let b = ge.current_graph_mut().add_node("B", (200.0, 0.0));
-    let b_in = ge.current_graph_mut().add_port(b, PortDirection::Input, SocketType::Float, "In");
-    let b_out = ge.current_graph_mut().add_port(b, PortDirection::Output, SocketType::Float, "Out");
+    let b_in = ge
+        .current_graph_mut()
+        .add_port(b, PortDirection::Input, SocketType::Float, "In");
+    let b_out = ge
+        .current_graph_mut()
+        .add_port(b, PortDirection::Output, SocketType::Float, "Out");
     let c = ge.current_graph_mut().add_node("C", (400.0, 0.0));
-    let c_in = ge.current_graph_mut().add_port(c, PortDirection::Input, SocketType::Float, "In");
+    let c_in = ge
+        .current_graph_mut()
+        .add_port(c, PortDirection::Input, SocketType::Float, "In");
     ge.current_graph_mut().connect(a_out, b_in).unwrap();
     ge.current_graph_mut().connect(b_out, c_in).unwrap();
 
@@ -588,27 +679,57 @@ fn graph_editor_full_roundtrip() {
 
     // Root graph should have A, C, Group (3 nodes), 2 connections
     assert_eq!(restored.current_graph().node_count(), 3, "Root: 3 nodes");
-    assert_eq!(restored.current_graph().connection_count(), 2, "Root: 2 connections");
+    assert_eq!(
+        restored.current_graph().connection_count(),
+        2,
+        "Root: 2 connections"
+    );
 
     // Should have a group node with SubgraphRoot
-    let group_count = restored.current_graph().world.query::<SubgraphRoot>().count();
-    assert_eq!(group_count, 1, "Root should have 1 group node with SubgraphRoot");
+    let group_count = restored
+        .current_graph()
+        .world
+        .query::<SubgraphRoot>()
+        .count();
+    assert_eq!(
+        group_count, 1,
+        "Root should have 1 group node with SubgraphRoot"
+    );
 
     // Should have 2 graphs total (root + subgraph)
     assert_eq!(data.graphs.len(), 2, "Should serialize 2 graphs");
 
     // Enter the group and verify subgraph
-    let group_node_id = restored.current_graph().world.query::<SubgraphRoot>()
-        .map(|(id, _)| id).next().unwrap();
+    let group_node_id = restored
+        .current_graph()
+        .world
+        .query::<SubgraphRoot>()
+        .map(|(id, _)| id)
+        .next()
+        .unwrap();
     let mut restored = restored;
-    assert!(restored.enter_group(group_node_id), "Should be able to enter group");
+    assert!(
+        restored.enter_group(group_node_id),
+        "Should be able to enter group"
+    );
 
     // Subgraph should have B + IO nodes
-    assert!(restored.current_graph().node_count() >= 2, "Subgraph should have B + IO nodes");
+    assert!(
+        restored.current_graph().node_count() >= 2,
+        "Subgraph should have B + IO nodes"
+    );
 
     // IO nodes should have GroupIOKind
-    let io_count = restored.current_graph().world.query::<GroupIOKind>().count();
-    assert!(io_count >= 1, "Subgraph should have IO nodes with GroupIOKind, got {}", io_count);
+    let io_count = restored
+        .current_graph()
+        .world
+        .query::<GroupIOKind>()
+        .count();
+    assert!(
+        io_count >= 1,
+        "Subgraph should have IO nodes with GroupIOKind, got {}",
+        io_count
+    );
 }
 
 // ============================================================
@@ -622,7 +743,13 @@ fn change_tracking() {
     let mut ids = Vec::new();
     for i in 0..10 {
         let id = world.spawn();
-        world.insert(id, NodePosition { x: i as f64 * 10.0, y: 0.0 });
+        world.insert(
+            id,
+            NodePosition {
+                x: i as f64 * 10.0,
+                y: 0.0,
+            },
+        );
         ids.push(id);
     }
 
@@ -636,7 +763,10 @@ fn change_tracking() {
         }
     }
 
-    let changed: Vec<EntityId> = world.change_tracker.changed_entities::<NodePosition>().collect();
+    let changed: Vec<EntityId> = world
+        .change_tracker
+        .changed_entities::<NodePosition>()
+        .collect();
     assert_eq!(changed.len(), 5);
 
     for &i in &modified_indices {
