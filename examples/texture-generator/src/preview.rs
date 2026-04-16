@@ -2,11 +2,11 @@ use std::rc::Rc;
 
 use dominator::html;
 use futures_signals::signal::SignalExt;
-use wasm_bindgen::JsCast;
 use wasm_bindgen::Clamped;
+use wasm_bindgen::JsCast;
 
-use nodegraph_core::EntityId;
 use nodegraph_core::graph::node::NodeTypeId;
+use nodegraph_core::EntityId;
 use nodegraph_render::GraphSignals;
 
 use crate::reactive_eval::ReactiveEval;
@@ -16,7 +16,7 @@ use crate::texture::{TextureBuffer, TEX_SIZE};
 fn canvas_dims(type_id: &str) -> (u32, u32, &'static str) {
     match type_id {
         "tiled_preview" => (TEX_SIZE as u32 * 4, TEX_SIZE as u32 * 4, "140"),
-        "iso_preview" => (96, 96, "140"),
+        "iso_preview" | "block_preview" => (96, 96, "140"),
         "preview" => (TEX_SIZE as u32, TEX_SIZE as u32, "140"),
         _ => (TEX_SIZE as u32, TEX_SIZE as u32, "80"),
     }
@@ -44,6 +44,7 @@ pub fn make_custom_body(
                 | "gradient"
                 | "brick"
                 | "mix"
+                | "blend"
                 | "brightness_contrast"
                 | "threshold"
                 | "invert"
@@ -51,7 +52,7 @@ pub fn make_custom_body(
         );
         let is_output = matches!(
             type_id.as_str(),
-            "preview" | "tiled_preview" | "iso_preview"
+            "preview" | "tiled_preview" | "iso_preview" | "block_preview"
         );
 
         if !has_image_output && !is_output {
@@ -79,19 +80,29 @@ pub fn make_custom_body(
                 .style("background", "#000")
                 .after_inserted(move |el| {
                     let canvas: web_sys::HtmlCanvasElement = el.unchecked_into();
-                    let sig = reval.texture_signal_for_node(node_id, &type_id_for_signal);
                     let render_type = type_id_for_render;
 
-                    wasm_bindgen_futures::spawn_local(async move {
-                        sig.for_each(move |tex| {
-                            match render_type.as_str() {
-                                "tiled_preview" => render_tiled(&canvas, &tex),
-                                "iso_preview" => render_isometric(&canvas, &tex),
-                                _ => render_direct(&canvas, &tex),
-                            }
-                            async {}
-                        }).await;
-                    });
+                    if render_type == "block_preview" {
+                        let sig = reval.block_preview_signal(node_id);
+                        wasm_bindgen_futures::spawn_local(async move {
+                            sig.for_each(move |(top, side)| {
+                                render_block(&canvas, &top, &side);
+                                async {}
+                            }).await;
+                        });
+                    } else {
+                        let sig = reval.texture_signal_for_node(node_id, &type_id_for_signal);
+                        wasm_bindgen_futures::spawn_local(async move {
+                            sig.for_each(move |tex| {
+                                match render_type.as_str() {
+                                    "tiled_preview" => render_tiled(&canvas, &tex),
+                                    "iso_preview" => render_isometric(&canvas, &tex),
+                                    _ => render_direct(&canvas, &tex),
+                                }
+                                async {}
+                            }).await;
+                        });
+                    }
                 })
             }))
         }))
@@ -146,14 +157,26 @@ fn render_isometric(canvas: &web_sys::HtmlCanvasElement, tex: &TextureBuffer) {
         None => return,
     };
     let pixels = isometric_pixels(tex);
-    let image_data = match web_sys::ImageData::new_with_u8_clamped_array_and_sh(
-        Clamped(&pixels),
-        96,
-        96,
-    ) {
-        Ok(d) => d,
-        Err(_) => return,
+    let image_data =
+        match web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&pixels), 96, 96) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+    let _ = ctx.put_image_data(&image_data, 0.0, 0.0);
+}
+
+/// Isometric cube with separate textures for the top face vs the side faces.
+fn render_block(canvas: &web_sys::HtmlCanvasElement, top: &TextureBuffer, side: &TextureBuffer) {
+    let ctx = match get_2d_ctx(canvas) {
+        Some(c) => c,
+        None => return,
     };
+    let pixels = block_preview_pixels(top, side);
+    let image_data =
+        match web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&pixels), 96, 96) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
     let _ = ctx.put_image_data(&image_data, 0.0, 0.0);
 }
 
@@ -172,6 +195,50 @@ pub(crate) fn tiled_pixels(tex: &TextureBuffer) -> Vec<u8> {
             pixels[dst..dst + 4].copy_from_slice(&src);
         }
     }
+    pixels
+}
+
+/// Two-texture variant of `isometric_pixels`: `top` is used on the top face at
+/// full brightness; `side` is used on both vertical faces (left at 0.7×, right
+/// at 0.5× shade). Face geometry matches `isometric_pixels`.
+pub(crate) fn block_preview_pixels(top: &TextureBuffer, side: &TextureBuffer) -> Vec<u8> {
+    let w = 96usize;
+    let h = 96usize;
+    let mut pixels = vec![0u8; w * h * 4];
+
+    for py in 0..h {
+        for px in 0..w {
+            let (fpx, fpy) = (px as f64, py as f64);
+
+            // Top face
+            let u = (fpx - 48.0 + 2.0 * fpy) / 96.0;
+            let v = fpy / 24.0 - u;
+            if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) {
+                let c = sample_tex(top, u, v);
+                set_pixel(&mut pixels, w, px, py, c);
+                continue;
+            }
+
+            // Left face (side texture, darker shade)
+            let u = fpx / 48.0;
+            let v = (fpy - 24.0 - 24.0 * u) / 48.0;
+            if (0.0..1.0).contains(&u) && (0.0..=1.0).contains(&v) {
+                let c = sample_tex_shaded(side, u, v, 0.7);
+                set_pixel(&mut pixels, w, px, py, c);
+                continue;
+            }
+
+            // Right face (side texture, darkest shade)
+            let u = (fpx - 48.0) / 48.0;
+            let v = (fpy - 48.0 + 24.0 * u) / 48.0;
+            if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) {
+                let c = sample_tex_shaded(side, u, v, 0.5);
+                set_pixel(&mut pixels, w, px, py, c);
+                continue;
+            }
+        }
+    }
+
     pixels
 }
 
@@ -250,7 +317,6 @@ mod tests {
     use crate::texture::{TextureBuffer, TEX_SIZE};
     use wasm_bindgen_test::*;
 
-
     /// Helper: create a texture where pixel (x, y) has a unique color.
     fn make_gradient_tex() -> TextureBuffer {
         let mut tex = TextureBuffer::new();
@@ -278,8 +344,8 @@ mod tests {
 
         let c = sample_tex_shaded(&tex, 0.0, 0.0, 0.5);
         assert_eq!(c[0], 100); // 200 * 0.5
-        assert_eq!(c[1], 50);  // 100 * 0.5
-        assert_eq!(c[2], 25);  // 50 * 0.5
+        assert_eq!(c[1], 50); // 100 * 0.5
+        assert_eq!(c[2], 25); // 50 * 0.5
         assert_eq!(c[3], 255); // alpha preserved
     }
 

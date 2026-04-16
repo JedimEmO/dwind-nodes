@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use dominator::{html, events, clone};
+use dominator::{clone, events, html};
 use futures_signals::signal::{Mutable, SignalExt};
 use wasm_bindgen::JsCast;
 
@@ -24,14 +24,16 @@ impl ParamStore {
     }
 
     pub fn get_float(&self, port_id: EntityId, default: f64) -> Mutable<f64> {
-        self.floats.borrow_mut()
+        self.floats
+            .borrow_mut()
             .entry(port_id)
             .or_insert_with(|| Mutable::new(default))
             .clone()
     }
 
     pub fn get_color(&self, port_id: EntityId, default: [u8; 4]) -> Mutable<[u8; 4]> {
-        self.colors.borrow_mut()
+        self.colors
+            .borrow_mut()
             .entry(port_id)
             .or_insert_with(|| Mutable::new(default))
             .clone()
@@ -84,14 +86,14 @@ pub fn default_float(type_id: &str, label: &str) -> f64 {
 /// Default color values per node type + port label.
 pub fn default_color(type_id: &str, label: &str) -> [u8; 4] {
     match (type_id, label) {
-        ("solid_color", "Color") => [139, 105, 20, 255],     // brown
-        ("checker", "Color A") => [180, 180, 180, 255],       // light gray
-        ("checker", "Color B") => [80, 80, 80, 255],          // dark gray
-        ("gradient", "Color A") => [20, 20, 60, 255],         // dark blue
-        ("gradient", "Color B") => [200, 180, 140, 255],      // sand
-        ("brick", "Mortar") => [120, 120, 120, 255],           // gray mortar
-        ("brick", "Brick") => [160, 80, 60, 255],              // red brick
-        ("colorize", "Tint") => [139, 105, 20, 255],           // brown
+        ("solid_color", "Color") => [139, 105, 20, 255], // brown
+        ("checker", "Color A") => [180, 180, 180, 255],  // light gray
+        ("checker", "Color B") => [80, 80, 80, 255],     // dark gray
+        ("gradient", "Color A") => [20, 20, 60, 255],    // dark blue
+        ("gradient", "Color B") => [200, 180, 140, 255], // sand
+        ("brick", "Mortar") => [120, 120, 120, 255],     // gray mortar
+        ("brick", "Brick") => [160, 80, 60, 255],        // red brick
+        ("colorize", "Tint") => [139, 105, 20, 255],     // brown
         _ => [200, 200, 200, 255],
     }
 }
@@ -114,52 +116,69 @@ fn rgba_to_hex(c: [u8; 4]) -> String {
 
 /// Build the port_widget callback for the texture generator.
 #[allow(clippy::type_complexity)]
-pub fn make_port_widget(params: &Rc<ParamStore>) -> Rc<dyn Fn(EntityId, EntityId, SocketType, PortDirection, &str, bool, &Rc<GraphSignals>) -> Option<dominator::Dom>> {
+pub fn make_port_widget(
+    params: &Rc<ParamStore>,
+) -> Rc<
+    dyn Fn(
+        EntityId,
+        EntityId,
+        SocketType,
+        PortDirection,
+        &str,
+        bool,
+        &Rc<GraphSignals>,
+    ) -> Option<dominator::Dom>,
+> {
     let params = params.clone();
-    Rc::new(move |_node_id, port_id, socket_type, port_dir, type_id, is_connected, _gs| {
-        // Solid Color: always show color picker on its output port
-        if type_id == "solid_color" && port_dir == PortDirection::Output {
-            let label = _gs.with_graph(|g| {
-                g.world.get::<nodegraph_core::graph::port::PortLabel>(port_id)
-                    .map(|l| l.0.clone())
-                    .unwrap_or_default()
-            });
-            let default = default_color(type_id, &label);
-            let mutable = params.get_color(port_id, default);
-            return Some(color_picker(mutable));
-        }
-
-        // Only show widgets on disconnected input ports
-        if port_dir != PortDirection::Input || is_connected {
-            return None;
-        }
-
-        match socket_type {
-            SocketType::Float => {
+    Rc::new(
+        move |_node_id, port_id, socket_type, port_dir, type_id, is_connected, _gs| {
+            // Solid Color: always show color picker on its output port
+            if type_id == "solid_color" && port_dir == PortDirection::Output {
                 let label = _gs.with_graph(|g| {
-                    g.world.get::<nodegraph_core::graph::port::PortLabel>(port_id)
-                        .map(|l| l.0.clone())
-                        .unwrap_or_default()
-                });
-                let default = default_float(type_id, &label);
-                let mutable = params.get_float(port_id, default);
-                Some(float_input(FloatInputProps::new()
-                    .value(Box::new(mutable) as Box<dyn nodegraph_widgets::FloatValueWrapper>)
-                ))
-            }
-            SocketType::Color => {
-                let label = _gs.with_graph(|g| {
-                    g.world.get::<nodegraph_core::graph::port::PortLabel>(port_id)
+                    g.world
+                        .get::<nodegraph_core::graph::port::PortLabel>(port_id)
                         .map(|l| l.0.clone())
                         .unwrap_or_default()
                 });
                 let default = default_color(type_id, &label);
                 let mutable = params.get_color(port_id, default);
-                Some(color_picker(mutable))
+                return Some(color_picker(mutable));
             }
-            _ => None,
-        }
-    })
+
+            // Only show widgets on disconnected input ports
+            if port_dir != PortDirection::Input || is_connected {
+                return None;
+            }
+
+            match socket_type {
+                SocketType::Float => {
+                    let label = _gs.with_graph(|g| {
+                        g.world
+                            .get::<nodegraph_core::graph::port::PortLabel>(port_id)
+                            .map(|l| l.0.clone())
+                            .unwrap_or_default()
+                    });
+                    let default = default_float(type_id, &label);
+                    let mutable = params.get_float(port_id, default);
+                    Some(float_input(FloatInputProps::new().value(
+                        Box::new(mutable) as Box<dyn nodegraph_widgets::FloatValueWrapper>
+                    )))
+                }
+                SocketType::Color => {
+                    let label = _gs.with_graph(|g| {
+                        g.world
+                            .get::<nodegraph_core::graph::port::PortLabel>(port_id)
+                            .map(|l| l.0.clone())
+                            .unwrap_or_default()
+                    });
+                    let default = default_color(type_id, &label);
+                    let mutable = params.get_color(port_id, default);
+                    Some(color_picker(mutable))
+                }
+                _ => None,
+            }
+        },
+    )
 }
 
 /// Minimal inline color picker: a small swatch that wraps an `<input type="color">`.
@@ -208,7 +227,6 @@ mod tests {
     use super::*;
     use wasm_bindgen_test::*;
 
-
     #[wasm_bindgen_test]
     fn default_float_known() {
         assert_eq!(default_float("checker", "Size"), 4.0);
@@ -229,7 +247,10 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn default_color_unknown_gray() {
-        assert_eq!(default_color("nonexistent", "Whatever"), [200, 200, 200, 255]);
+        assert_eq!(
+            default_color("nonexistent", "Whatever"),
+            [200, 200, 200, 255]
+        );
     }
 
     #[wasm_bindgen_test]

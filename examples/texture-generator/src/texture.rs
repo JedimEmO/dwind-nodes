@@ -31,7 +31,6 @@ mod tests {
     use super::*;
     use wasm_bindgen_test::*;
 
-
     #[wasm_bindgen_test]
     fn new_correct_dimensions() {
         let buf = TextureBuffer::new();

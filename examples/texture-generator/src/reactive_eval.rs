@@ -93,10 +93,7 @@ impl ReactiveEval {
             .clone()
     }
 
-    fn get_or_create_color_source(
-        &self,
-        port_id: EntityId,
-    ) -> Mutable<Option<Mutable<[u8; 4]>>> {
+    fn get_or_create_color_source(&self, port_id: EntityId) -> Mutable<Option<Mutable<[u8; 4]>>> {
         self.color_sources
             .borrow_mut()
             .entry(port_id)
@@ -112,12 +109,16 @@ impl ReactiveEval {
     fn build_tex_input(&self, port_id: EntityId) -> BoxSignal<Rc<TextureBuffer>> {
         let source = self.get_or_create_tex_source(port_id);
         let black = Rc::new(TextureBuffer::new());
-        Box::pin(source.signal_cloned().switch(move |opt| -> BoxSignal<Rc<TextureBuffer>> {
-            match opt {
-                Some(upstream) => Box::pin(upstream.signal_cloned()),
-                None => Box::pin(always(black.clone())),
-            }
-        }))
+        Box::pin(
+            source
+                .signal_cloned()
+                .switch(move |opt| -> BoxSignal<Rc<TextureBuffer>> {
+                    match opt {
+                        Some(upstream) => Box::pin(upstream.signal_cloned()),
+                        None => Box::pin(always(black.clone())),
+                    }
+                }),
+        )
     }
 
     /// Build a color input signal: watches upstream if connected, else watches param fallback.
@@ -130,12 +131,16 @@ impl ReactiveEval {
         let source = self.get_or_create_color_source(port_id);
         let default = params::default_color(type_id, label);
         let param = self.params.get_color(port_id, default);
-        Box::pin(source.signal_cloned().switch(move |opt| -> BoxSignal<[u8; 4]> {
-            match opt {
-                Some(upstream) => Box::pin(upstream.signal()),
-                None => Box::pin(param.signal()),
-            }
-        }))
+        Box::pin(
+            source
+                .signal_cloned()
+                .switch(move |opt| -> BoxSignal<[u8; 4]> {
+                    match opt {
+                        Some(upstream) => Box::pin(upstream.signal()),
+                        None => Box::pin(param.signal()),
+                    }
+                }),
+        )
     }
 
     /// Build a float input signal: watches param Mutable directly.
@@ -149,6 +154,44 @@ impl ReactiveEval {
     // ----------------------------------------------------------------
     // Texture signal for canvas preview binding
     // ----------------------------------------------------------------
+
+    /// Build a (top, side) texture-pair signal for `block_preview` nodes.
+    /// Looks up the Top and Side input ports by label and watches both.
+    /// Missing or unconnected ports fall back to black.
+    pub fn block_preview_signal(
+        &self,
+        node_id: EntityId,
+    ) -> BoxSignal<(Rc<TextureBuffer>, Rc<TextureBuffer>)> {
+        let (top_port, side_port) = self.gs.with_graph(|g| {
+            let mut top = None;
+            let mut side = None;
+            for &pid in g.node_ports(node_id) {
+                if g.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) {
+                    continue;
+                }
+                match g.world.get::<PortLabel>(pid).map(|l| l.0.as_str()) {
+                    Some("Top") => top = Some(pid),
+                    Some("Side") => side = Some(pid),
+                    _ => {}
+                }
+            }
+            (top, side)
+        });
+
+        let black = Rc::new(TextureBuffer::new());
+        let top_sig: BoxSignal<Rc<TextureBuffer>> = match top_port {
+            Some(pid) => self.build_tex_input(pid),
+            None => Box::pin(always(black.clone())),
+        };
+        let side_sig: BoxSignal<Rc<TextureBuffer>> = match side_port {
+            Some(pid) => self.build_tex_input(pid),
+            None => Box::pin(always(black)),
+        };
+        Box::pin(map_ref! {
+            let top = top_sig,
+            let side = side_sig => { (top.clone(), side.clone()) }
+        })
+    }
 
     /// Get a signal for a node's texture, suitable for canvas rendering.
     /// For non-sink nodes: watches the output port.
@@ -181,9 +224,7 @@ impl ReactiveEval {
                     .iter()
                     .find(|&&pid| {
                         g.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Output)
-                            && g.world
-                                .get::<PortSocketType>(pid)
-                                .map(|s| s.0)
+                            && g.world.get::<PortSocketType>(pid).map(|s| s.0)
                                 == Some(SocketType::Image)
                     })
                     .copied()
@@ -205,9 +246,9 @@ impl ReactiveEval {
     pub fn handle_connect(&self, src_port: EntityId, tgt_port: EntityId, conn_id: EntityId) {
         self.conn_targets.borrow_mut().insert(conn_id, tgt_port);
 
-        let tgt_type = self.gs.with_graph(|g| {
-            g.world.get::<PortSocketType>(tgt_port).map(|s| s.0)
-        });
+        let tgt_type = self
+            .gs
+            .with_graph(|g| g.world.get::<PortSocketType>(tgt_port).map(|s| s.0));
 
         match tgt_type {
             Some(SocketType::Image) => {
@@ -221,8 +262,7 @@ impl ReactiveEval {
             Some(SocketType::Color) => {
                 let src = self.color_outputs.borrow().get(&src_port).cloned();
                 if let Some(src_m) = src {
-                    if let Some(tgt_source) = self.color_sources.borrow().get(&tgt_port).cloned()
-                    {
+                    if let Some(tgt_source) = self.color_sources.borrow().get(&tgt_port).cloned() {
                         tgt_source.set(Some(src_m));
                     }
                 }
@@ -288,9 +328,7 @@ impl ReactiveEval {
         });
 
         let alive = Rc::new(Cell::new(true));
-        self.node_alive
-            .borrow_mut()
-            .insert(node_id, alive.clone());
+        self.node_alive.borrow_mut().insert(node_id, alive.clone());
 
         // Create source selectors for input ports
         for &(pid, dir, stype, _) in &ports {
@@ -332,17 +370,18 @@ impl ReactiveEval {
             "gradient" => self.spawn_gradient(node_id, &ports, alive),
             "brick" => self.spawn_brick(node_id, &ports, alive),
             "mix" => self.spawn_mix(node_id, &ports, alive),
+            "blend" => self.spawn_blend(node_id, &ports, alive),
             "brightness_contrast" => self.spawn_brightness_contrast(node_id, &ports, alive),
             "threshold" => self.spawn_threshold(node_id, &ports, alive),
             "invert" => self.spawn_invert(node_id, &ports, alive),
             "colorize" => self.spawn_colorize(node_id, &ports, alive),
             // Sink nodes don't need computation — canvas rendering is handled by preview.rs
-            "preview" | "tiled_preview" | "iso_preview" => {}
+            "preview" | "tiled_preview" | "iso_preview" | "block_preview" => {}
             _ => {
                 // Unknown type or group node: check for SubgraphRoot
-                let is_group = self.gs.with_graph(|g| {
-                    g.world.get::<SubgraphRoot>(node_id).is_some()
-                });
+                let is_group = self
+                    .gs
+                    .with_graph(|g| g.world.get::<SubgraphRoot>(node_id).is_some());
                 if is_group {
                     self.spawn_group(node_id, &ports, alive);
                 }
@@ -364,20 +403,9 @@ impl ReactiveEval {
     // ----------------------------------------------------------------
 
     pub fn reconcile(&self) {
-        let live_nodes: Vec<EntityId> = self
-            .gs
-            .node_list
-            .lock_ref()
-            .iter()
-            .copied()
-            .collect();
-        let live_conns: Vec<EntityId> = self
-            .gs
-            .connection_list
-            .lock_ref()
-            .iter()
-            .copied()
-            .collect();
+        let live_nodes: Vec<EntityId> = self.gs.node_list.lock_ref().iter().copied().collect();
+        let live_conns: Vec<EntityId> =
+            self.gs.connection_list.lock_ref().iter().copied().collect();
 
         let live_node_set: HashSet<EntityId> = live_nodes.iter().copied().collect();
         let live_conn_set: HashSet<EntityId> = live_conns.iter().copied().collect();
@@ -412,15 +440,14 @@ impl ReactiveEval {
         }
 
         // Ensure all live connections are wired
-        let known_conns: HashSet<EntityId> =
-            self.conn_targets.borrow().keys().copied().collect();
+        let known_conns: HashSet<EntityId> = self.conn_targets.borrow().keys().copied().collect();
         for &conn_id in &live_conns {
             if known_conns.contains(&conn_id) {
                 continue;
             }
-            let endpoints = self.gs.with_graph(|g| {
-                g.world.get::<ConnectionEndpoints>(conn_id).cloned()
-            });
+            let endpoints = self
+                .gs
+                .with_graph(|g| g.world.get::<ConnectionEndpoints>(conn_id).cloned());
             if let Some(ep) = endpoints {
                 self.handle_connect(ep.source_port, ep.target_port, conn_id);
             }
@@ -522,11 +549,11 @@ impl ReactiveEval {
         let size_port = Self::find_port(ports, PortDirection::Input, "Size");
         let out_port = Self::find_output_image(ports);
 
-        let (ca_port, cb_port, size_port, out_port) =
-            match (ca_port, cb_port, size_port, out_port) {
-                (Some(a), Some(b), Some(s), Some(o)) => (a, b, s, o),
-                _ => return,
-            };
+        let (ca_port, cb_port, size_port, out_port) = match (ca_port, cb_port, size_port, out_port)
+        {
+            (Some(a), Some(b), Some(s), Some(o)) => (a, b, s, o),
+            _ => return,
+        };
 
         let ca_sig = self.build_color_input(ca_port, "checker", "Color A");
         let cb_sig = self.build_color_input(cb_port, "checker", "Color B");
@@ -666,11 +693,11 @@ impl ReactiveEval {
         let factor_port = Self::find_port(ports, PortDirection::Input, "Factor");
         let out_port = Self::find_output_image(ports);
 
-        let (a_port, b_port, factor_port, out_port) =
-            match (a_port, b_port, factor_port, out_port) {
-                (Some(a), Some(b), Some(f), Some(o)) => (a, b, f, o),
-                _ => return,
-            };
+        let (a_port, b_port, factor_port, out_port) = match (a_port, b_port, factor_port, out_port)
+        {
+            (Some(a), Some(b), Some(f), Some(o)) => (a, b, f, o),
+            _ => return,
+        };
 
         let a_sig = self.build_tex_input(a_port);
         let b_sig = self.build_tex_input(b_port);
@@ -686,6 +713,43 @@ impl ReactiveEval {
             .for_each(move |(a, b, factor)| {
                 if alive.get() {
                     output.set(Rc::new(eval::eval_mix(Some(a), Some(b), factor)));
+                }
+                async {}
+            })
+            .await;
+        });
+    }
+
+    fn spawn_blend(
+        &self,
+        _node_id: EntityId,
+        ports: &[(EntityId, PortDirection, SocketType, String)],
+        alive: Rc<Cell<bool>>,
+    ) {
+        let a_port = Self::find_port(ports, PortDirection::Input, "A");
+        let b_port = Self::find_port(ports, PortDirection::Input, "B");
+        let mask_port = Self::find_port(ports, PortDirection::Input, "Mask");
+        let out_port = Self::find_output_image(ports);
+
+        let (a_port, b_port, mask_port, out_port) = match (a_port, b_port, mask_port, out_port) {
+            (Some(a), Some(b), Some(m), Some(o)) => (a, b, m, o),
+            _ => return,
+        };
+
+        let a_sig = self.build_tex_input(a_port);
+        let b_sig = self.build_tex_input(b_port);
+        let mask_sig = self.build_tex_input(mask_port);
+        let output = self.get_or_create_tex_output(out_port);
+
+        wasm_bindgen_futures::spawn_local(async move {
+            map_ref! {
+                let a = a_sig,
+                let b = b_sig,
+                let mask = mask_sig => { (a.clone(), b.clone(), mask.clone()) }
+            }
+            .for_each(move |(a, b, mask)| {
+                if alive.get() {
+                    output.set(Rc::new(eval::eval_blend(Some(a), Some(b), Some(mask))));
                 }
                 async {}
             })
@@ -712,8 +776,7 @@ impl ReactiveEval {
 
         let tex_sig = self.build_tex_input(tex_port);
         let bright_sig = self.build_float_input(bright_port, "brightness_contrast", "Brightness");
-        let contrast_sig =
-            self.build_float_input(contrast_port, "brightness_contrast", "Contrast");
+        let contrast_sig = self.build_float_input(contrast_port, "brightness_contrast", "Contrast");
         let output = self.get_or_create_tex_output(out_port);
 
         wasm_bindgen_futures::spawn_local(async move {
@@ -916,19 +979,24 @@ impl ReactiveEval {
         // Also watch internal subgraph param signals so edits inside the group
         // trigger recomputation of group outputs.
         {
-            let subgraph_id = self.gs.with_graph(|g| {
-                g.world.get::<SubgraphRoot>(node_id).map(|s| s.0)
-            });
+            let subgraph_id = self
+                .gs
+                .with_graph(|g| g.world.get::<SubgraphRoot>(node_id).map(|s| s.0));
             if let Some(sub_id) = subgraph_id {
                 let internal_ports: Vec<(EntityId, SocketType)> = {
                     let editor = self.gs.editor.borrow();
                     if let Some(sub) = editor.graph(sub_id) {
-                        sub.world.query::<nodegraph_core::graph::node::NodeHeader>()
+                        sub.world
+                            .query::<nodegraph_core::graph::node::NodeHeader>()
                             .flat_map(|(nid, _)| {
-                                sub.node_ports(nid).iter().filter_map(|&pid| {
-                                    let st = sub.world.get::<PortSocketType>(pid).map(|s| s.0)?;
-                                    Some((pid, st))
-                                }).collect::<Vec<_>>()
+                                sub.node_ports(nid)
+                                    .iter()
+                                    .filter_map(|&pid| {
+                                        let st =
+                                            sub.world.get::<PortSocketType>(pid).map(|s| s.0)?;
+                                        Some((pid, st))
+                                    })
+                                    .collect::<Vec<_>>()
                             })
                             .collect()
                     } else {
@@ -939,21 +1007,29 @@ impl ReactiveEval {
                     let version = version.clone();
                     match st {
                         SocketType::Float => {
-                            let m = self.params.get_float(pid, crate::params::default_float("", ""));
+                            let m = self
+                                .params
+                                .get_float(pid, crate::params::default_float("", ""));
                             wasm_bindgen_futures::spawn_local(async move {
-                                m.signal().for_each(move |_| {
-                                    version.set(version.get().wrapping_add(1));
-                                    async {}
-                                }).await;
+                                m.signal()
+                                    .for_each(move |_| {
+                                        version.set(version.get().wrapping_add(1));
+                                        async {}
+                                    })
+                                    .await;
                             });
                         }
                         SocketType::Color => {
-                            let m = self.params.get_color(pid, crate::params::default_color("", ""));
+                            let m = self
+                                .params
+                                .get_color(pid, crate::params::default_color("", ""));
                             wasm_bindgen_futures::spawn_local(async move {
-                                m.signal().for_each(move |_| {
-                                    version.set(version.get().wrapping_add(1));
-                                    async {}
-                                }).await;
+                                m.signal()
+                                    .for_each(move |_| {
+                                        version.set(version.get().wrapping_add(1));
+                                        async {}
+                                    })
+                                    .await;
                             });
                         }
                         _ => {}
@@ -967,11 +1043,14 @@ impl ReactiveEval {
             let version = version.clone();
             let gs2 = self.gs.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                gs2.connection_list.signal_vec_cloned().to_signal_cloned()
+                gs2.connection_list
+                    .signal_vec_cloned()
+                    .to_signal_cloned()
                     .for_each(move |_| {
                         version.set(version.get().wrapping_add(1));
                         async {}
-                    }).await;
+                    })
+                    .await;
             });
         }
 
