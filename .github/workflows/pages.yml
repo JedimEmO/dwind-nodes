@@ -31,15 +31,15 @@ jobs:
           chmod +x trunk
           sudo mv trunk /usr/local/bin/
 
-      - name: Build trivial-calculator example
+      - name: Build texture-generator example
         run: |
-          cd examples/trivial-calculator
+          cd examples/texture-generator
           trunk build --release --public-url /dwind-nodes/
 
       - name: Prepare pages output
         run: |
           mkdir -p _site
-          cp -r examples/trivial-calculator/dist/* _site/
+          cp -r examples/texture-generator/dist/* _site/
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
