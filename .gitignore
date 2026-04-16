@@ -3,3 +3,7 @@ dist/
 crates/*/dist/
 examples/*/dist/
 .claude/
+.playwright-mcp/
+# Playwright iteration screenshots (generated during dev; don't commit)
+/grass-v*.png
+/page-*.png
