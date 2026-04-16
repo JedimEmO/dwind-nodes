@@ -8,7 +8,7 @@ signal-driven reactivity, and a small expressive API.
 
 ![Texture-generator example showing a procedural Minecraft-style grass block composed from 11 reactive nodes](docs/texture-generator.png)
 
-**[Live Demo](https://mathiasmyrland.github.io/dwind-nodes/)**
+**[Live Demo](https://jedimemo.github.io/dwind-nodes/)**
 
 ## What it is
 
