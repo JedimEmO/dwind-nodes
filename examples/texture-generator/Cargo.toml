@@ -13,6 +13,7 @@ nodegraph-widgets = { workspace = true }
 wasm-bindgen = { workspace = true }
 dominator = { workspace = true }
 dwind = { workspace = true }
+dwind-macros = { workspace = true }
 console_error_panic_hook = { workspace = true }
 futures-signals = { workspace = true }
 wasm-bindgen-futures = { workspace = true }

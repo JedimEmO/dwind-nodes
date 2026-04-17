@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use dominator::{clone, events, html};
+use dwind::prelude::*;
 use futures_signals::signal::{Mutable, SignalExt};
 use wasm_bindgen::JsCast;
 
@@ -185,18 +186,11 @@ pub fn make_port_widget(
 fn color_picker(value: Mutable<[u8; 4]>) -> dominator::Dom {
     html!("div", {
         .attr("data-port-widget", "")
-        .style("position", "relative")
-        .style("width", "100%")
-        .style("height", "16px")
-        .style("pointer-events", "auto")
+        .dwclass!("relative w-full h-4 pointer-events-auto")
 
         // Visible swatch
         .child(html!("div", {
-            .style("width", "100%")
-            .style("height", "100%")
-            .style("border-radius", "2px")
-            .style("border", "1px solid #555")
-            .style("cursor", "pointer")
+            .dwclass!("w-full h-full rounded-sm border border-gray-600 cursor-pointer")
             .style_signal("background", value.signal().map(|c| {
                 format!("rgb({},{},{})", c[0], c[1], c[2])
             }))
@@ -205,13 +199,8 @@ fn color_picker(value: Mutable<[u8; 4]>) -> dominator::Dom {
         // Hidden native color input overlaid
         .child(html!("input" => web_sys::HtmlInputElement, {
             .attr("type", "color")
-            .style("position", "absolute")
-            .style("top", "0")
-            .style("left", "0")
-            .style("width", "100%")
-            .style("height", "100%")
+            .dwclass!("absolute top-0 left-0 w-full h-full cursor-pointer")
             .style("opacity", "0")
-            .style("cursor", "pointer")
             .attr_signal("value", value.signal().map(rgba_to_hex))
             .event(clone!(value => move |e: events::Input| {
                 let target: web_sys::HtmlInputElement = e.target().unwrap().unchecked_into();

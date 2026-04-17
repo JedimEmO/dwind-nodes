@@ -1,11 +1,14 @@
 use std::rc::Rc;
 
 use dominator::{clone, events, html, Dom, EventOptions};
+use dwind::prelude::*;
 use futures_signals::map_ref;
 use futures_signals::signal::{Mutable, SignalExt};
 use wasm_bindgen::JsCast;
 
 use crate::graph_signals::GraphSignals;
+
+const FONT_STACK: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
 /// Search menu as an absolutely-positioned HTML div, outside the SVG.
 pub fn render_search_menu(gs: &Rc<GraphSignals>) -> Dom {
@@ -13,17 +16,11 @@ pub fn render_search_menu(gs: &Rc<GraphSignals>) -> Dom {
     let selected_index = Mutable::new(0_usize);
 
     html!("div", {
-        .style("position", "absolute")
+        .dwclass!("absolute w-56 overflow-hidden rounded-md border border-gray-600 bg-bunker-800 text-xs text-gray-300")
+        // z-index 100 and max-height 300px are off dwind's scales; keep raw.
         .style("z-index", "100")
-        .style("width", "220px")
         .style("max-height", "300px")
-        .style("background", gs.theme.menu_bg)
-        .style("border", &format!("1px solid {}", gs.theme.menu_border))
-        .style("border-radius", "6px")
-        .style("overflow", "hidden")
-        .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-        .style("font-size", "12px")
-        .style("color", gs.theme.menu_text)
+        .style("font-family", FONT_STACK)
         .style("box-shadow", gs.theme.menu_shadow)
 
         .style_signal("display", gs.search_menu.signal_cloned().map(|opt| {
@@ -57,15 +54,11 @@ pub fn render_search_menu(gs: &Rc<GraphSignals>) -> Dom {
         .child(html!("input", {
             .attr("type", "text")
             .attr("placeholder", "Search nodes...")
-            .style("width", "100%")
-            .style("padding", "8px 10px")
+            .dwclass!("w-full py-2 px-2.5 bg-bunker-900 text-white-50 text-xs")
+            // border-none + bottom-only-border: express as raw, since dwind has no border-b-1 shorthand with color in one class
             .style("border", "none")
             .style("border-bottom", &format!("1px solid {}", gs.theme.menu_input_border))
-            .style("background", gs.theme.menu_input_bg)
-            .style("color", gs.theme.menu_input_text)
-            .style("font-size", "12px")
             .style("outline", "none")
-            .style("box-sizing", "border-box")
 
             .event(clone!(search_text, selected_index => move |e: events::Input| {
                 if let Some(target) = e.target() {
@@ -128,8 +121,9 @@ pub fn render_search_menu(gs: &Rc<GraphSignals>) -> Dom {
 
         // Results list
         .child(html!("div", {
+            .dwclass!("overflow-y-auto")
+            // max-height 260px isn't on the scale; keep raw.
             .style("max-height", "260px")
-            .style("overflow-y", "auto")
 
             .child_signal(map_ref! {
                 let query = search_text.signal_cloned(),
@@ -153,8 +147,7 @@ pub fn render_search_menu(gs: &Rc<GraphSignals>) -> Dom {
                         let is_selected = i == idx;
 
                         html!("div", {
-                            .style("padding", "6px 10px")
-                            .style("cursor", "pointer")
+                            .dwclass!("py-1.5 px-2.5 cursor-pointer")
                             .style("background", if is_selected { gs.theme.menu_selected_bg } else { "transparent" })
                             .style("border-left", &{
                                 if is_selected {
@@ -165,13 +158,13 @@ pub fn render_search_menu(gs: &Rc<GraphSignals>) -> Dom {
                             })
 
                             .child(html!("div", {
-                                .style("font-weight", "bold")
-                                .style("color", gs.theme.menu_input_text)
+                                .dwclass!("font-bold text-white-50")
                                 .text(&name)
                             }))
                             .child(html!("div", {
+                                .dwclass!("text-gray-500")
+                                // 9px is below dwind's rem scale; keep raw.
                                 .style("font-size", "9px")
-                                .style("color", gs.theme.menu_category_text)
                                 .text(&category)
                             }))
 

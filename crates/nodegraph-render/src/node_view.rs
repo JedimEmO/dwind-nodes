@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use dominator::{clone, events, html, svg, Dom, EventOptions};
+use dwind::prelude::*;
 use futures_signals::map_ref;
 use futures_signals::signal::{Mutable, SignalExt};
 use futures_signals::signal_vec::SignalVecExt;
@@ -12,6 +13,8 @@ use nodegraph_core::store::EntityId;
 use nodegraph_core::types::socket_type::SocketType;
 
 use crate::graph_signals::{is_valid_connection_target, GraphSignals, ATTR_NODE_ID, ATTR_PORT_ID};
+
+const FONT_STACK: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
 pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     let pos_signal = gs
@@ -188,25 +191,19 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
 
             .child(html!("div", {
                 .attr("xmlns", "http://www.w3.org/1999/xhtml")
-                .style("width", "100%")
-                .style("height", "100%")
-                .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
+                .dwclass!("w-full h-full pointer-events-none")
+                .style("font-family", FONT_STACK)
                 .style("user-select", "none")
-                .style("pointer-events", "none")
 
                 // Header
                 .child(html!("div", {
+                    .dwclass!("flex items-center font-bold overflow-hidden")
                     .style("height", &format!("{}px", HEADER_HEIGHT))
                     .style("padding", &format!("0 {}px", PORT_RADIUS + 8.0))
-                    .style("display", "flex")
-                    .style("align-items", "center")
                     .style("color", gs.theme.header_text)
-                    .style("font-weight", "bold")
                     .style("font-size", "11px")
                     .style("white-space", "nowrap")
-                    .style("overflow", "hidden")
                     .style("text-overflow", "ellipsis")
-                    .style("box-sizing", "border-box")
                     .text_signal(header_signal.signal_cloned().map(|h| h.title))
                 }))
 
@@ -224,14 +221,10 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                         let output_label = output_info.as_ref().map(|(_, _, l)| l.clone()).unwrap_or_default();
 
                         html!("div", {
+                            .dwclass!("flex justify-between items-center text-gray-300")
                             .style("height", &format!("{}px", PORT_HEIGHT))
-                            .style("display", "flex")
-                            .style("justify-content", "space-between")
-                            .style("align-items", "center")
                             .style("padding", &format!("0 {}px", PORT_RADIUS + 8.0))
-                            .style("box-sizing", "border-box")
                             .style("font-size", "10px")
-                            .style("color", gs.theme.port_label_text)
                             .style("gap", "3px")
 
                             // Left side: input label + input widget

@@ -53,6 +53,10 @@ dominator app does.
 | `nodegraph-render` | SVG rendering, reactive signals, UI components |
 | `nodegraph-widgets` | Compact inline input widgets (float, int, bool, string) |
 
+UI styling uses [dwind](https://crates.io/crates/dwind) utility classes via
+`dwclass!()`; raw `.style()` is reserved for dynamic values (pan/zoom-driven
+positions, interpolated transforms) and SVG attributes the macro can't express.
+
 ## Quick Start
 
 ```rust

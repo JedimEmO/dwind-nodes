@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use dominator::{clone, events, html, svg, Dom};
+use dwind::prelude::*;
 use futures_signals::map_ref;
 use futures_signals::signal::SignalExt;
 use futures_signals::signal_vec::SignalVecExt;
@@ -38,16 +39,11 @@ pub fn render_minimap(gs: &Rc<GraphSignals>) -> Dom {
 
     html!("div", {
         .attr("data-minimap", "")
-        .style("position", "absolute")
-        .style("bottom", "8px")
-        .style("right", "8px")
+        .dwclass!("absolute bottom-2 right-2 overflow-hidden rounded border border-gray-700 z-40")
+        // Minimap dimensions don't land on dwind's rem scale; keep raw.
         .style("width", &format!("{}px", MINIMAP_WIDTH))
         .style("height", &format!("{}px", MINIMAP_HEIGHT))
         .style("background", theme.minimap_bg)
-        .style("border", &format!("1px solid {}", theme.minimap_border))
-        .style("border-radius", "4px")
-        .style("overflow", "hidden")
-        .style("z-index", "40")
         .style("cursor", "crosshair")
 
         .after_inserted(clone!(minimap_rect => move |el| {

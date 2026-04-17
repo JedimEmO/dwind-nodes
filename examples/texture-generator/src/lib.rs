@@ -1,5 +1,8 @@
 #![cfg_attr(test, allow(dead_code, unused_imports))]
 
+#[macro_use]
+extern crate dwind_macros;
+
 mod eval;
 mod nodes;
 mod params;
@@ -10,6 +13,7 @@ pub(crate) mod texture;
 use std::rc::Rc;
 
 use dominator::html;
+use dwind::prelude::*;
 use futures_signals::signal::SignalExt;
 use futures_signals::signal_vec::SignalVecExt;
 use nodegraph_core::graph::node::{CustomBodyHeight, NodeTypeId};
@@ -92,8 +96,7 @@ pub fn main() {
     dominator::append_dom(
         &dominator::body(),
         html!("div", {
-            .style("width", "100%")
-            .style("height", "100%")
+            .dwclass!("w-full h-full")
             .child(render_graph_editor(gs))
         }),
     );
