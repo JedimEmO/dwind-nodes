@@ -12,7 +12,7 @@ serde_json = "1.0"
 nodegraph-core = { path = "crates/nodegraph-core" }
 nodegraph-render = { path = "crates/nodegraph-render" }
 dominator = "0.5"
-dwind = "0.6"
+dwind = "0.7"
 dwind-macros = "0.4"
 futures-signals = "0.3"
 wasm-bindgen = "0.2"
