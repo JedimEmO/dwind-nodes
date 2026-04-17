@@ -295,10 +295,10 @@ impl InteractionController {
     ) {
         match event {
             InputEvent::MouseDown {
+                screen,
                 world,
                 button: MouseButton::Left,
                 modifiers,
-                ..
             } => {
                 let target = hit_test(graph, cache, world);
                 // Deselect frames when clicking on non-frame targets
@@ -380,26 +380,21 @@ impl InteractionController {
                         };
                     }
                     HitTarget::Nothing => {
-                        if !modifiers.shift {
+                        if modifiers.shift {
+                            self.state = InteractionState::BoxSelecting {
+                                start_world: world,
+                                current_world: world,
+                            };
+                        } else {
                             self.selection.clear();
                             effects.push(SideEffect::SelectionChanged);
+                            self.state = InteractionState::Panning {
+                                last_screen: screen,
+                            };
                         }
-                        self.state = InteractionState::BoxSelecting {
-                            start_world: world,
-                            current_world: world,
-                        };
                     }
                     _ => {}
                 }
-            }
-            InputEvent::MouseDown {
-                screen,
-                button: MouseButton::Middle,
-                ..
-            } => {
-                self.state = InteractionState::Panning {
-                    last_screen: screen,
-                };
             }
             InputEvent::MouseDown {
                 world,
@@ -436,7 +431,7 @@ impl InteractionController {
                 };
             }
             InputEvent::MouseUp {
-                button: MouseButton::Middle,
+                button: MouseButton::Left,
                 ..
             } => {
                 self.state = InteractionState::Idle;

@@ -131,6 +131,7 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
 
     svg!("g", {
         .attr(ATTR_NODE_ID, &format!("{}", node_id.index))
+        .attr("cursor", "move")
         .attr_signal("transform", pos_signal.signal().map(|(x, y)| format!("translate({}, {})", x, y)))
         .attr("opacity", if is_muted { "0.4" } else { "1" })
 

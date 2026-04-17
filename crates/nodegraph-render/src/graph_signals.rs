@@ -144,6 +144,10 @@ pub struct GraphSignals {
     pub context_menu: Mutable<Option<(HitTarget, f64, f64)>>,
     #[doc(hidden)]
     pub viewport_size: Mutable<(f64, f64)>,
+    /// True while the viewport is being panned (LMB-drag on empty canvas).
+    /// Drives the grab/grabbing cursor.
+    #[doc(hidden)]
+    pub is_panning: Mutable<bool>,
     /// Whether the keyboard shortcut help overlay is visible.
     pub show_help: Mutable<bool>,
     pub(crate) last_synced_graph: std::cell::Cell<Option<EntityId>>,
@@ -185,6 +189,7 @@ impl GraphSignals {
             port_widget: Rc::new(RefCell::new(None)),
             graph_bounds: Mutable::new((0.0, 0.0, 800.0, 600.0)),
             viewport_size: Mutable::new((800.0, 600.0)),
+            is_panning: Mutable::new(false),
             show_help: Mutable::new(false),
             context_menu: Mutable::new(None),
             callbacks: RefCell::new(GraphCallbacks::default()),
@@ -821,6 +826,8 @@ impl GraphSignals {
             let ctrl = self.controller.borrow();
             self.pan.set(ctrl.viewport.pan);
             self.zoom.set(ctrl.viewport.zoom);
+            self.is_panning
+                .set_neq(matches!(ctrl.state, InteractionState::Panning { .. }));
         }
         {
             let ctrl = self.controller.borrow();

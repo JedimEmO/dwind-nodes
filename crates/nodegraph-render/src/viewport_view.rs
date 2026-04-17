@@ -19,9 +19,9 @@ use crate::search_menu::render_search_menu;
 /// Render a complete node graph editor as a DOM element.
 ///
 /// The returned `Dom` fills its parent container (100% width/height) and provides:
-/// pan (middle-click), zoom (scroll), node dragging, connection drawing,
-/// box selection, cut links (Ctrl+RMB), search menu (Shift+A), right-click
-/// context menu, minimap, and keyboard shortcuts.
+/// pan (LMB-drag on empty canvas), zoom (scroll), node dragging, connection drawing,
+/// box selection (Shift+LMB on empty canvas), cut links (Ctrl+RMB), search menu
+/// (Shift+A), right-click context menu, minimap, and keyboard shortcuts.
 ///
 /// ```rust,ignore
 /// let gs = GraphSignals::new();
@@ -38,6 +38,7 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
         .style("position", "relative")
         .style("overflow", "hidden")
         .style("background", gs.theme.canvas_bg)
+        .style_signal("cursor", gs.is_panning.signal().map(|p| if p { "grabbing" } else { "grab" }))
 
         .after_inserted(clone!(gs, container_rect => move |el| {
             let rect = el.get_bounding_client_rect();
@@ -49,6 +50,11 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
             &EventOptions { preventable: true, ..EventOptions::default() },
             clone!(gs, container_rect => move |e: events::ContextMenu| {
                 e.prevent_default();
+                // Ctrl+RMB is the cut-links gesture; suppress the context menu so it
+                // doesn't flash/stick during or after the drag.
+                if e.ctrl_key() {
+                    return;
+                }
                 // Open context menu at click position with hit target
                 let cr = container_rect.get();
                 let screen_x = e.mouse_x() as f64 - cr.0;

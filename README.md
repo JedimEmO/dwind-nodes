@@ -170,7 +170,8 @@ jagged-mask blend — shown in the screenshot above.
 | `H` | Toggle collapse |
 | `M` | Toggle mute |
 | `A` | Select all / deselect all |
-| Middle mouse | Pan |
+| Left-drag on empty canvas | Pan |
+| `Shift`+left-drag on empty canvas | Box select |
 | Scroll | Zoom |
 | `Ctrl`+right-drag | Cut links |
 
