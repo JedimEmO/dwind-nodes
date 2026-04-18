@@ -28,6 +28,12 @@ use dominator::Dom;
 /// Returns `Some(Dom)` to add content below port rows, or `None` to skip.
 pub type CustomNodeBodyFn = dyn Fn(EntityId, &Rc<GraphSignals>) -> Option<Dom>;
 
+/// User-provided callback mapping a node type_id to an optional body height.
+/// Invoked during node creation to set `CustomBodyHeight` atomically — before
+/// the node is published for rendering — so nodes with preview/output bodies
+/// render at the correct size on first paint.
+pub type BodyHeightForTypeFn = dyn Fn(&str) -> Option<f64>;
+
 pub(crate) type NodePositionMap = Rc<RefCell<HashMap<EntityId, Mutable<(f64, f64)>>>>;
 pub(crate) type NodeHeaderMap = Rc<RefCell<HashMap<EntityId, Mutable<NodeHeader>>>>;
 pub(crate) type FrameBoundsMap = Rc<RefCell<HashMap<EntityId, Mutable<(f64, f64, f64, f64)>>>>;
@@ -95,6 +101,10 @@ pub struct GraphSignals {
     pub custom_node_body: Rc<RefCell<Option<Rc<CustomNodeBodyFn>>>>,
     /// Optional callback to render inline widgets on port rows.
     pub port_widget: Rc<RefCell<Option<Rc<PortWidgetFn>>>>,
+    /// Optional callback returning the body height for a given node type_id.
+    /// Called during node creation so `CustomBodyHeight` is set atomically
+    /// before the node is published to the render list.
+    pub body_height_for_type: Rc<RefCell<Option<Rc<BodyHeightForTypeFn>>>>,
 
     /// User callbacks for graph events. Set via the `set_on_*` methods; fired
     /// internally by the matching `fire_*` methods, which clone-out the handle
@@ -187,6 +197,7 @@ impl GraphSignals {
             theme: Theme::dark(),
             custom_node_body: Rc::new(RefCell::new(None)),
             port_widget: Rc::new(RefCell::new(None)),
+            body_height_for_type: Rc::new(RefCell::new(None)),
             graph_bounds: Mutable::new((0.0, 0.0, 800.0, 600.0)),
             viewport_size: Mutable::new((800.0, 600.0)),
             is_panning: Mutable::new(false),
@@ -308,6 +319,12 @@ impl GraphSignals {
         position: (f64, f64),
         ports: Vec<(PortDirection, SocketType, String)>,
     ) -> (EntityId, Vec<EntityId>) {
+        let body_height = type_id.and_then(|tid| {
+            self.body_height_for_type
+                .borrow()
+                .as_ref()
+                .and_then(|f| f(tid))
+        });
         let (node_id, port_ids) = self.with_graph_mut(|graph| {
             let nid = graph.add_node(title, position);
             let pids: Vec<EntityId> = ports
@@ -319,6 +336,11 @@ impl GraphSignals {
                     nid,
                     nodegraph_core::graph::node::NodeTypeId(tid.to_string()),
                 );
+            }
+            if let Some(h) = body_height {
+                graph
+                    .world
+                    .insert(nid, nodegraph_core::graph::node::CustomBodyHeight(h));
             }
             (nid, pids)
         });
@@ -372,15 +394,8 @@ impl GraphSignals {
 
         self.save_undo();
         let type_id_owned = def.type_id.clone();
-        let (node_id, new_ports) = self.add_node(&def.display_name, position, all_ports);
-
-        // Store type_id on the node for type dispatch
-        self.with_graph_mut(|g| {
-            g.world.insert(
-                node_id,
-                nodegraph_core::graph::node::NodeTypeId(type_id_owned.clone()),
-            );
-        });
+        let (node_id, new_ports) =
+            self.add_node_typed(&def.display_name, Some(&type_id_owned), position, all_ports);
 
         // Mark reroute nodes
         if type_id_owned == "reroute" {

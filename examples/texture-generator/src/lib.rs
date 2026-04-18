@@ -14,10 +14,7 @@ use std::rc::Rc;
 
 use dominator::html;
 use dwind::prelude::*;
-use futures_signals::signal::SignalExt;
-use futures_signals::signal_vec::SignalVecExt;
-use nodegraph_core::graph::node::{CustomBodyHeight, NodeTypeId};
-use nodegraph_core::{EntityId, PortDirection, SocketType};
+use nodegraph_core::{PortDirection, SocketType};
 use nodegraph_render::{render_graph_editor, GraphSignals};
 use wasm_bindgen::prelude::*;
 
@@ -57,9 +54,19 @@ pub fn main() {
         gs.custom_node_body.borrow_mut().replace(cb);
     }
 
+    // Body-height callback: invoked during node creation so `CustomBodyHeight`
+    // is set atomically before the node is published for rendering. Without
+    // this, newly spawned preview nodes would render at header-only height
+    // and clip their canvas.
+    gs.body_height_for_type
+        .borrow_mut()
+        .replace(Rc::new(|tid: &str| {
+            let h = body_height_for_type(tid);
+            (h > 0.0).then_some(h)
+        }));
+
     // === Default scene ===
-    let scene = build_default_scene(&gs, &params);
-    set_body_heights(&gs, &scene);
+    build_default_scene(&gs, &params);
 
     // Wire reactive eval to current graph state
     reval.initial_setup();
@@ -83,11 +90,6 @@ pub fn main() {
         });
     }
 
-    // Watch new nodes for CustomBodyHeight insertion based on their type.
-    // This is render-affecting state that must be set before the node renders;
-    // using a signal watcher keeps it in lock-step with reactive-eval setup.
-    spawn_body_height_watcher(&gs);
-
     // Reconciliation watcher for undo/redo/delete/group — subscribes to
     // node_list + connection_list MutableVec signals and reconciles on any
     // structural change.
@@ -102,14 +104,8 @@ pub fn main() {
     );
 }
 
-struct SceneNodes {
-    all_node_ids: Vec<EntityId>,
-}
-
-fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneNodes {
+fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) {
     use nodegraph_core::graph::node::NodeHeader;
-
-    let mut all_node_ids: Vec<EntityId> = Vec::new();
 
     // ===== Minecraft-style grass block (ungrouped) =====
     // Graph shape:
@@ -152,12 +148,12 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
     };
 
     // --- grass column ---
-    let (grass_n_id, grass_n_ports) =
+    let (_grass_n_id, grass_n_ports) =
         gs.add_node_typed("Noise", Some("noise"), (60.0, 40.0), noise_ports());
     params.get_float(grass_n_ports[0], 5.5); // Scale (higher = finer grain)
     params.get_float(grass_n_ports[1], 7.0); // Seed
 
-    let (grass_c_id, grass_c_ports) = gs.add_node_typed(
+    let (_grass_c_id, grass_c_ports) = gs.add_node_typed(
         "Colorize",
         Some("colorize"),
         (280.0, 40.0),
@@ -168,12 +164,12 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
     // --- dirt column ---
     // Ordering: Noise → BC → Colorize. The BC step pushes noise values up so
     // the multiply in Colorize doesn't crush the dirt into near-black.
-    let (dirt_n_id, dirt_n_ports) =
+    let (_dirt_n_id, dirt_n_ports) =
         gs.add_node_typed("Noise", Some("noise"), (60.0, 280.0), noise_ports());
     params.get_float(dirt_n_ports[0], 4.5); // finer pebbly dirt
     params.get_float(dirt_n_ports[1], 13.0);
 
-    let (dirt_bc_id, dirt_bc_ports) = gs.add_node_typed(
+    let (_dirt_bc_id, dirt_bc_ports) = gs.add_node_typed(
         "Brightness/Contrast",
         Some("brightness_contrast"),
         (280.0, 280.0),
@@ -203,7 +199,7 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
     params.get_float(dirt_bc_ports[1], 0.35); // brighten noise before tint
     params.get_float(dirt_bc_ports[2], 0.4); // punch up contrast
 
-    let (dirt_c_id, dirt_c_ports) = gs.add_node_typed(
+    let (_dirt_c_id, dirt_c_ports) = gs.add_node_typed(
         "Colorize",
         Some("colorize"),
         (500.0, 280.0),
@@ -212,7 +208,7 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
     params.get_color(dirt_c_ports[1], [168, 120, 78, 255]);
 
     // --- mask column ---
-    let (grad_id, grad_ports) = gs.add_node_typed(
+    let (_grad_id, grad_ports) = gs.add_node_typed(
         "Gradient",
         Some("gradient"),
         (60.0, 520.0),
@@ -240,12 +236,12 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
     params.get_color(grad_ports[0], [0, 0, 0, 255]); // Color A = top = black
     params.get_color(grad_ports[1], [255, 255, 255, 255]); // Color B = bottom = white
 
-    let (jag_n_id, jag_n_ports) =
+    let (_jag_n_id, jag_n_ports) =
         gs.add_node_typed("Noise", Some("noise"), (60.0, 760.0), noise_ports());
     params.get_float(jag_n_ports[0], 7.0); // chunkier grass drape
     params.get_float(jag_n_ports[1], 99.0);
 
-    let (mix_id, mix_ports) = gs.add_node_typed(
+    let (_mix_id, mix_ports) = gs.add_node_typed(
         "Mix",
         Some("mix"),
         (320.0, 640.0),
@@ -266,7 +262,7 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
     );
     params.get_float(mix_ports[2], 0.45); // let jagged noise dominate the gradient
 
-    let (thresh_id, thresh_ports) = gs.add_node_typed(
+    let (_thresh_id, thresh_ports) = gs.add_node_typed(
         "Threshold",
         Some("threshold"),
         (560.0, 640.0),
@@ -288,7 +284,7 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
                                             // end up above it in luminance → more dirt, less grass (Minecraft-proportion drape)
 
     // --- blend + preview ---
-    let (blend_id, blend_ports) = gs.add_node_typed(
+    let (_blend_id, blend_ports) = gs.add_node_typed(
         "Blend",
         Some("blend"),
         (780.0, 400.0),
@@ -304,7 +300,7 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
         ],
     );
 
-    let (block_preview_id, block_preview_ports) = gs.add_node_typed(
+    let (_block_preview_id, block_preview_ports) = gs.add_node_typed(
         "Block Preview",
         Some("block_preview"),
         (1080.0, 40.0),
@@ -313,22 +309,6 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
             (PortDirection::Input, SocketType::Image, "Side".to_string()),
         ],
     );
-
-    for (nid, tid) in [
-        (grass_n_id, "noise"),
-        (grass_c_id, "colorize"),
-        (dirt_n_id, "noise"),
-        (dirt_c_id, "colorize"),
-        (dirt_bc_id, "brightness_contrast"),
-        (grad_id, "gradient"),
-        (jag_n_id, "noise"),
-        (mix_id, "mix"),
-        (thresh_id, "threshold"),
-        (blend_id, "blend"),
-        (block_preview_id, "block_preview"),
-    ] {
-        set_body_height_for_node(gs, nid, tid);
-    }
 
     // Wiring
     let _ = gs.connect_ports(grass_n_ports[2], grass_c_ports[0]); // GrassNoise → GrassColorize.Texture
@@ -344,22 +324,6 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
     let _ = gs.connect_ports(blend_ports[3], block_preview_ports[1]); // Blend → BlockPreview.Side
 
     gs.full_sync_pub();
-
-    for nid in [
-        grass_n_id,
-        grass_c_id,
-        dirt_n_id,
-        dirt_c_id,
-        dirt_bc_id,
-        grad_id,
-        jag_n_id,
-        mix_id,
-        thresh_id,
-        blend_id,
-        block_preview_id,
-    ] {
-        all_node_ids.push(nid);
-    }
 
     // ===== Grass group =====
     let (grass_noise_id, grass_noise_ports) = gs.add_node_typed(
@@ -396,7 +360,7 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
         ],
     );
 
-    let (grass_color_id, grass_color_ports) = gs.add_node_typed(
+    let (_grass_color_id, grass_color_ports) = gs.add_node_typed(
         "Solid Color",
         Some("solid_color"),
         (60.0, 1040.0),
@@ -408,7 +372,7 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
     );
     params.get_color(grass_color_ports[0], [74, 160, 46, 255]);
 
-    let (grass_tiled_id, grass_tiled_ports) = gs.add_node_typed(
+    let (_grass_tiled_id, grass_tiled_ports) = gs.add_node_typed(
         "Tiled Preview",
         Some("tiled_preview"),
         (380.0, 1040.0),
@@ -418,9 +382,6 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
             "Texture".to_string(),
         )],
     );
-
-    set_body_height_for_node(gs, grass_noise_id, "noise");
-    set_body_height_for_node(gs, grass_colorize_id, "colorize");
 
     let _ = gs.connect_ports(grass_noise_ports[2], grass_colorize_ports[0]);
     let _ = gs.connect_ports(grass_color_ports[0], grass_colorize_ports[1]);
@@ -464,12 +425,7 @@ fn build_default_scene(gs: &Rc<GraphSignals>, params: &Rc<ParamStore>) -> SceneN
             set_subgraph_float(sub, params, "Noise", "Seed", 42.0);
         }
         drop(editor);
-        all_node_ids.push(gid);
     }
-    all_node_ids.push(grass_color_id);
-    all_node_ids.push(grass_tiled_id);
-
-    SceneNodes { all_node_ids }
 }
 
 fn set_subgraph_float(
@@ -502,44 +458,9 @@ fn set_subgraph_float(
     }
 }
 
-fn set_body_height_for_node(gs: &Rc<GraphSignals>, node_id: EntityId, type_id: &str) {
-    let h = body_height_for_type(type_id);
-    if h > 0.0 {
-        gs.with_graph_mut(|g| {
-            g.world.insert(node_id, CustomBodyHeight(h));
-        });
-    }
-}
-
-/// Subscribes to the node list. Whenever it emits a diff, visits every node
-/// with a `NodeTypeId` (i.e. spawned from the registry) and inserts the
-/// matching `CustomBodyHeight` component. Idempotent: re-inserting the same
-/// component is cheap and reaches a fixed point.
-fn spawn_body_height_watcher(gs: &Rc<GraphSignals>) {
-    use nodegraph_core::graph::node::NodeHeader;
-    let gs2 = gs.clone();
-    wasm_bindgen_futures::spawn_local(async move {
-        gs2.node_list
-            .signal_vec_cloned()
-            .to_signal_cloned()
-            .for_each(move |_| {
-                let ids: Vec<(EntityId, String)> = gs2.with_graph(|g| {
-                    g.world
-                        .query::<NodeHeader>()
-                        .filter_map(|(id, _)| {
-                            g.world.get::<NodeTypeId>(id).map(|t| (id, t.0.clone()))
-                        })
-                        .collect()
-                });
-                for (id, tid) in ids {
-                    set_body_height_for_node(&gs2, id, &tid);
-                }
-                async {}
-            })
-            .await;
-    });
-}
-
+/// Per-type preview/output body height in pixels. `0.0` means no custom body.
+/// Wired via `GraphSignals::body_height_for_type` so new nodes receive
+/// `CustomBodyHeight` atomically at creation time.
 fn body_height_for_type(type_id: &str) -> f64 {
     match type_id {
         "preview" | "tiled_preview" | "iso_preview" | "block_preview" => OUTPUT_BODY_H,
@@ -555,20 +476,4 @@ fn body_height_for_type(type_id: &str) -> f64 {
         | "colorize" => PREVIEW_BODY_H,
         _ => 0.0,
     }
-}
-
-fn set_body_heights(gs: &Rc<GraphSignals>, scene: &SceneNodes) {
-    gs.with_graph_mut(|graph| {
-        for &nid in &scene.all_node_ids {
-            let type_id = graph
-                .world
-                .get::<nodegraph_core::graph::node::NodeTypeId>(nid)
-                .map(|t| t.0.clone())
-                .unwrap_or_default();
-            let h = body_height_for_type(&type_id);
-            if h > 0.0 {
-                graph.world.insert(nid, CustomBodyHeight(h));
-            }
-        }
-    });
 }
