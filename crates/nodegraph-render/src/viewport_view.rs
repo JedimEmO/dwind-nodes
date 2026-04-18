@@ -118,6 +118,19 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
             event_bridge::on_mouse_up(&gs, e, container_rect.get());
         }))
         .event(clone!(gs, container_rect => move |e: events::Wheel| {
+            // Let overlays with their own scroll behavior handle the wheel
+            // (e.g. scrolling the search-menu results list) instead of zooming
+            // the viewport. stopPropagation on children is unreliable here, so
+            // filter by target ancestry.
+            if let Some(target) = e.target() {
+                if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                    if el.closest("[data-search-menu]").ok().flatten().is_some()
+                        || el.closest("[data-context-menu]").ok().flatten().is_some()
+                    {
+                        return;
+                    }
+                }
+            }
             event_bridge::on_wheel(&gs, e, container_rect.get());
         }))
 
