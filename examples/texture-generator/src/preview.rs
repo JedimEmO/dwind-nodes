@@ -2,16 +2,18 @@ use std::rc::Rc;
 
 use dominator::html;
 use dwind::prelude::*;
-use futures_signals::signal::SignalExt;
+use futures_signals::signal::{always, SignalExt};
 use wasm_bindgen::Clamped;
 use wasm_bindgen::JsCast;
 
 use nodegraph_core::graph::node::NodeTypeId;
+use nodegraph_core::graph::port::{PortDirection, PortLabel, PortSocketType};
+use nodegraph_core::types::socket_type::SocketType;
 use nodegraph_core::EntityId;
 use nodegraph_render::GraphSignals;
+use nodegraph_runtime::prelude::{BoxSignal, Runtime};
 
-use crate::reactive_eval::ReactiveEval;
-use crate::texture::{TextureBuffer, TEX_SIZE};
+use crate::texture::{Texture, TextureBuffer, TEX_SIZE};
 
 /// Canvas dimensions for each node type.
 fn canvas_dims(type_id: &str) -> (u32, u32, &'static str) {
@@ -24,12 +26,12 @@ fn canvas_dims(type_id: &str) -> (u32, u32, &'static str) {
 }
 
 /// Build the custom_node_body callback that shows texture previews inside nodes.
-/// Each canvas reactively watches its node's texture signal.
+/// Each canvas reactively watches its node's texture signal via the runtime.
 #[allow(clippy::type_complexity)]
 pub fn make_custom_body(
-    reval: &Rc<ReactiveEval>,
+    runtime: &Rc<Runtime>,
 ) -> Rc<dyn Fn(EntityId, &Rc<GraphSignals>) -> Option<dominator::Dom>> {
-    let reval = reval.clone();
+    let runtime = runtime.clone();
     Rc::new(move |node_id, gs| {
         let type_id = gs.with_graph(|g| {
             g.world
@@ -61,7 +63,7 @@ pub fn make_custom_body(
         }
 
         let (cw, ch, css_size) = canvas_dims(&type_id);
-        let reval = reval.clone();
+        let runtime = runtime.clone();
         let type_id_for_signal = type_id.clone();
         let type_id_for_render = type_id.clone();
 
@@ -80,7 +82,7 @@ pub fn make_custom_body(
                     let render_type = type_id_for_render;
 
                     if render_type == "block_preview" {
-                        let sig = reval.block_preview_signal(node_id);
+                        let sig = block_preview_signal(&runtime, node_id);
                         wasm_bindgen_futures::spawn_local(async move {
                             sig.for_each(move |(top, side)| {
                                 render_block(&canvas, &top, &side);
@@ -88,7 +90,7 @@ pub fn make_custom_body(
                             }).await;
                         });
                     } else {
-                        let sig = reval.texture_signal_for_node(node_id, &type_id_for_signal);
+                        let sig = texture_signal_for_node(&runtime, node_id, &type_id_for_signal);
                         wasm_bindgen_futures::spawn_local(async move {
                             sig.for_each(move |tex| {
                                 match render_type.as_str() {
@@ -103,6 +105,94 @@ pub fn make_custom_body(
                 })
             }))
         }))
+    })
+}
+
+// ============================================================
+// Runtime → signal helpers (replace the old ReactiveEval methods)
+// ============================================================
+
+/// Signal of the texture this node should display on its preview canvas.
+/// For non-sink nodes, watches the node's output port Mutable. For sink
+/// nodes, watches the input port's source selector.
+pub fn texture_signal_for_node(
+    runtime: &Rc<Runtime>,
+    node_id: EntityId,
+    type_id: &str,
+) -> BoxSignal<Rc<TextureBuffer>> {
+    let is_sink = matches!(type_id, "preview" | "tiled_preview" | "iso_preview");
+
+    if is_sink {
+        let input_port = runtime.gs().with_graph(|g| {
+            g.node_ports(node_id)
+                .iter()
+                .find(|&&pid| {
+                    g.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Input)
+                })
+                .copied()
+        });
+        match input_port {
+            Some(pid) => {
+                let sig = runtime.input_signal_default::<Texture>(pid);
+                Box::pin(sig.map(|t| t.0))
+            }
+            None => Box::pin(always(Rc::new(TextureBuffer::new()))),
+        }
+    } else {
+        let output_port = runtime.gs().with_graph(|g| {
+            g.node_ports(node_id)
+                .iter()
+                .find(|&&pid| {
+                    g.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Output)
+                        && g.world.get::<PortSocketType>(pid).map(|s| s.0)
+                            == Some(SocketType::Image)
+                })
+                .copied()
+        });
+        match output_port {
+            Some(pid) => match runtime.get_output::<Texture>(pid) {
+                Some(m) => Box::pin(m.signal_cloned().map(|t| t.0)),
+                None => Box::pin(always(Rc::new(TextureBuffer::new()))),
+            },
+            None => Box::pin(always(Rc::new(TextureBuffer::new()))),
+        }
+    }
+}
+
+/// Signal of the (top, side) texture pair a `block_preview` node should
+/// render. Looks up the "Top" and "Side" input ports and watches both.
+pub fn block_preview_signal(
+    runtime: &Rc<Runtime>,
+    node_id: EntityId,
+) -> BoxSignal<(Rc<TextureBuffer>, Rc<TextureBuffer>)> {
+    let (top_port, side_port) = runtime.gs().with_graph(|g| {
+        let mut top = None;
+        let mut side = None;
+        for &pid in g.node_ports(node_id) {
+            if g.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) {
+                continue;
+            }
+            match g.world.get::<PortLabel>(pid).map(|l| l.0.as_str()) {
+                Some("Top") => top = Some(pid),
+                Some("Side") => side = Some(pid),
+                _ => {}
+            }
+        }
+        (top, side)
+    });
+
+    let black = Rc::new(TextureBuffer::new());
+    let top_sig: BoxSignal<Rc<TextureBuffer>> = match top_port {
+        Some(pid) => Box::pin(runtime.input_signal_default::<Texture>(pid).map(|t| t.0)),
+        None => Box::pin(always(black.clone())),
+    };
+    let side_sig: BoxSignal<Rc<TextureBuffer>> = match side_port {
+        Some(pid) => Box::pin(runtime.input_signal_default::<Texture>(pid).map(|t| t.0)),
+        None => Box::pin(always(black)),
+    };
+    Box::pin(futures_signals::map_ref! {
+        let top = top_sig,
+        let side = side_sig => { (top.clone(), side.clone()) }
     })
 }
 

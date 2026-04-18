@@ -21,3 +21,4 @@ web-sys = "0.3"
 console_error_panic_hook = "0.1"
 futures-signals-component-macro = "0.2"
 nodegraph-widgets = { path = "crates/nodegraph-widgets" }
+nodegraph-runtime = { path = "crates/nodegraph-runtime" }

@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 nodegraph-core = { path = "../../crates/nodegraph-core" }
 nodegraph-render = { path = "../../crates/nodegraph-render" }
 nodegraph-widgets = { workspace = true }
+nodegraph-runtime = { workspace = true }
 wasm-bindgen = { workspace = true }
 dominator = { workspace = true }
 dwind = { workspace = true }

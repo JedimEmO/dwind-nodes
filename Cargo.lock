@@ -515,6 +515,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nodegraph-runtime"
+version = "0.1.0"
+dependencies = [
+ "futures-signals",
+ "nodegraph-core",
+ "nodegraph-render",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test",
+]
+
+[[package]]
 name = "nodegraph-widgets"
 version = "0.1.0"
 dependencies = [
@@ -524,6 +536,7 @@ dependencies = [
  "futures-signals",
  "futures-signals-component-macro",
  "wasm-bindgen",
+ "wasm-bindgen-test",
  "web-sys",
 ]
 
@@ -796,6 +809,7 @@ dependencies = [
  "js-sys",
  "nodegraph-core",
  "nodegraph-render",
+ "nodegraph-runtime",
  "nodegraph-widgets",
  "wasm-bindgen",
  "wasm-bindgen-futures",

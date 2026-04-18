@@ -1,8 +1,42 @@
+use std::rc::Rc;
+
+use nodegraph_core::types::socket_type::SocketType;
+use nodegraph_runtime::prelude::ParamValue;
+
 pub const TEX_SIZE: usize = 16;
 
 #[derive(Clone)]
 pub struct TextureBuffer {
     pub data: Vec<[u8; 4]>,
+}
+
+impl Default for TextureBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Cheap-to-clone wrapper around `Rc<TextureBuffer>` — the value type that
+/// flows across `SocketType::Image` ports in the texture-generator app.
+/// A newtype is required because the orphan rule forbids `impl ParamValue
+/// for Rc<TextureBuffer>` from this crate.
+#[derive(Clone)]
+pub struct Texture(pub Rc<TextureBuffer>);
+
+impl Default for Texture {
+    fn default() -> Self {
+        Self(Rc::new(TextureBuffer::default()))
+    }
+}
+
+impl Texture {
+    pub fn new(buf: TextureBuffer) -> Self {
+        Self(Rc::new(buf))
+    }
+}
+
+impl ParamValue for Texture {
+    const SOCKET_TYPE: SocketType = SocketType::Image;
 }
 
 impl TextureBuffer {
