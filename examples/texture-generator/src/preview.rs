@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use dominator::html;
+use dwind::prelude::*;
 use futures_signals::signal::SignalExt;
 use wasm_bindgen::Clamped;
 use wasm_bindgen::JsCast;
@@ -65,18 +66,14 @@ pub fn make_custom_body(
         let type_id_for_render = type_id.clone();
 
         Some(html!("div", {
-            .style("display", "flex")
-            .style("justify-content", "center")
-            .style("padding", "4px 0")
-            .style("pointer-events", "none")
+            .dwclass!("flex justify-center py-1 pointer-events-none")
             .child(html!("canvas" => web_sys::HtmlCanvasElement, {
                 .attr("width", &cw.to_string())
                 .attr("height", &ch.to_string())
+                .dwclass!("border border-gray-700 rounded-sm")
                 .style("width", &format!("{}px", css_size))
                 .style("height", &format!("{}px", css_size))
                 .style("image-rendering", "pixelated")
-                .style("border", "1px solid #333")
-                .style("border-radius", "2px")
                 .style("background", "#000")
                 .after_inserted(move |el| {
                     let canvas: web_sys::HtmlCanvasElement = el.unchecked_into();

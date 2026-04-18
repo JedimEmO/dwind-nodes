@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use dominator::{clone, events, html, svg, Dom, EventOptions};
+use dwind::prelude::*;
 use futures_signals::map_ref;
 use futures_signals::signal::SignalExt;
 use futures_signals::signal_vec::SignalVecExt;
@@ -16,12 +17,14 @@ use crate::minimap_view::render_minimap;
 use crate::node_view::render_node;
 use crate::search_menu::render_search_menu;
 
+const FONT_STACK: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+
 /// Render a complete node graph editor as a DOM element.
 ///
 /// The returned `Dom` fills its parent container (100% width/height) and provides:
-/// pan (middle-click), zoom (scroll), node dragging, connection drawing,
-/// box selection, cut links (Ctrl+RMB), search menu (Shift+A), right-click
-/// context menu, minimap, and keyboard shortcuts.
+/// pan (LMB-drag on empty canvas), zoom (scroll), node dragging, connection drawing,
+/// box selection (Shift+LMB on empty canvas), cut links (Ctrl+RMB), search menu
+/// (Shift+A), right-click context menu, minimap, and keyboard shortcuts.
 ///
 /// ```rust,ignore
 /// let gs = GraphSignals::new();
@@ -33,11 +36,8 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
 
     // Outer HTML div for sizing and event capture
     html!("div", {
-        .style("width", "100%")
-        .style("height", "100%")
-        .style("position", "relative")
-        .style("overflow", "hidden")
-        .style("background", gs.theme.canvas_bg)
+        .dwclass!("w-full h-full relative overflow-hidden bg-bunker-900")
+        .style_signal("cursor", gs.is_panning.signal().map(|p| if p { "grabbing" } else { "grab" }))
 
         .after_inserted(clone!(gs, container_rect => move |el| {
             let rect = el.get_bounding_client_rect();
@@ -49,6 +49,11 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
             &EventOptions { preventable: true, ..EventOptions::default() },
             clone!(gs, container_rect => move |e: events::ContextMenu| {
                 e.prevent_default();
+                // Ctrl+RMB is the cut-links gesture; suppress the context menu so it
+                // doesn't flash/stick during or after the drag.
+                if e.ctrl_key() {
+                    return;
+                }
                 // Open context menu at click position with hit target
                 let cr = container_rect.get();
                 let screen_x = e.mouse_x() as f64 - cr.0;
@@ -113,12 +118,25 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
             event_bridge::on_mouse_up(&gs, e, container_rect.get());
         }))
         .event(clone!(gs, container_rect => move |e: events::Wheel| {
+            // Let overlays with their own scroll behavior handle the wheel
+            // (e.g. scrolling the search-menu results list) instead of zooming
+            // the viewport. stopPropagation on children is unreliable here, so
+            // filter by target ancestry.
+            if let Some(target) = e.target() {
+                if let Ok(el) = target.dyn_into::<web_sys::Element>() {
+                    if el.closest("[data-search-menu]").ok().flatten().is_some()
+                        || el.closest("[data-context-menu]").ok().flatten().is_some()
+                    {
+                        return;
+                    }
+                }
+            }
             event_bridge::on_wheel(&gs, e, container_rect.get());
         }))
 
         // Keyboard shortcuts
         .attr("tabindex", "0")
-        .style("outline", "none")
+        .style("outline", "none") // no dwind utility for outline:none
         .event_with_options(
             &EventOptions { preventable: true, ..EventOptions::default() },
             clone!(gs => move |e: events::KeyDown| {
@@ -221,24 +239,10 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
 
         // Help button (bottom-left corner)
         .child(html!("div", {
-            .style("position", "absolute")
-            .style("bottom", "8px")
-            .style("left", "8px")
-            .style("z-index", "50")
-            .style("width", "28px")
-            .style("height", "28px")
-            .style("border-radius", "14px")
-            .style("background", "rgba(30, 30, 48, 0.8)")
-            .style("border", &format!("1px solid {}", gs.theme.menu_border))
-            .style("display", "flex")
-            .style("align-items", "center")
-            .style("justify-content", "center")
-            .style("cursor", "pointer")
-            .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
+            .dwclass!("absolute bottom-2 left-2 z-50 w-7 h-7 rounded-full border border-gray-600 flex items-center justify-center cursor-pointer font-bold text-gray-500 pointer-events-auto")
+            .style("background", "rgba(28, 28, 37, 0.8)")
+            .style("font-family", FONT_STACK)
             .style("font-size", "14px")
-            .style("font-weight", "bold")
-            .style("color", "#888")
-            .style("pointer-events", "auto")
             .text("?")
             .event(clone!(gs => move |_: events::Click| {
                 gs.show_help.set(!gs.show_help.get());
@@ -247,35 +251,28 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
 
         // Keyboard shortcut help overlay (? to toggle)
         .child(html!("div", {
-            .style("position", "absolute")
+            .dwclass!("absolute border border-gray-600 rounded-lg py-5 px-7 text-gray-300 text-xs pointer-events-auto")
+            // Center on screen via translate; fine-grained positioning not expressible as utilities.
             .style("top", "50%")
             .style("left", "50%")
             .style("transform", "translate(-50%, -50%)")
             .style("z-index", "200")
             .style("background", "rgba(20, 20, 35, 0.95)")
-            .style("border", &format!("1px solid {}", gs.theme.menu_border))
-            .style("border-radius", "8px")
-            .style("padding", "20px 28px")
-            .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-            .style("color", "#ccc")
-            .style("font-size", "12px")
+            .style("font-family", FONT_STACK)
             .style("box-shadow", "0 8px 32px rgba(0,0,0,0.6)")
-            .style("pointer-events", "auto")
             .style("max-width", "420px")
             .style_signal("display", gs.show_help.signal().map(|show| {
                 if show { "block" } else { "none" }
             }))
 
             .child(html!("div", {
+                .dwclass!("font-bold text-white-50 mb-3")
                 .style("font-size", "14px")
-                .style("font-weight", "bold")
-                .style("color", "white")
-                .style("margin-bottom", "12px")
                 .text("Keyboard Shortcuts")
             }))
 
             .child(html!("div", {
-                .style("display", "grid")
+                .dwclass!("grid")
                 .style("grid-template-columns", "auto 1fr")
                 .style("gap", "4px 16px")
                 .style("line-height", "1.6")
@@ -292,7 +289,8 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                     ("H", "Collapse / Expand"),
                     ("M", "Mute / Unmute"),
                     ("A", "Select all / Deselect"),
-                    ("Middle mouse", "Pan viewport"),
+                    ("LMB drag (empty)", "Pan viewport"),
+                    ("Shift+LMB drag", "Box select"),
                     ("Scroll", "Zoom"),
                     ("Ctrl+RMB drag", "Cut links"),
                     ("Right-click", "Context menu"),
@@ -300,8 +298,8 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
                 ].into_iter().flat_map(|(key, desc)| {
                     vec![
                         html!("span", {
+                            .dwclass!("font-bold")
                             .style("color", gs.theme.selection_highlight)
-                            .style("font-weight", "bold")
                             .style("font-family", "monospace")
                             .style("font-size", "11px")
                             .text(key)
@@ -312,10 +310,9 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
             }))
 
             .child(html!("div", {
-                .style("margin-top", "12px")
+                .dwclass!("mt-3 text-center")
                 .style("color", "#666")
                 .style("font-size", "10px")
-                .style("text-align", "center")
                 .text("Press ? or Escape to close")
             }))
         }))
@@ -325,24 +322,14 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
 
         // Breadcrumb navigation
         .child(html!("div", {
-            .style("position", "absolute")
-            .style("top", "8px")
-            .style("left", "8px")
-            .style("z-index", "50")
-            .style("display", "flex")
-            .style("gap", "4px")
-            .style("align-items", "center")
-            .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-            .style("font-size", "12px")
+            .dwclass!("absolute top-2 left-2 z-50 flex gap-1 items-center text-xs")
+            .style("font-family", FONT_STACK)
 
             .children_signal_vec(
                 gs.breadcrumb.signal_vec_cloned().map(clone!(gs => move |(graph_id, label)| {
                     html!("span", {
-                        .style("color", gs.theme.breadcrumb_text)
-                        .style("cursor", "pointer")
-                        .style("padding", "4px 8px")
+                        .dwclass!("text-gray-400 cursor-pointer py-1 px-2 rounded")
                         .style("background", gs.theme.breadcrumb_bg)
-                        .style("border-radius", "4px")
                         .text(&format!("{} ›", label))
                         .event(clone!(gs => move |_: events::Click| {
                             gs.navigate_to_graph(graph_id);
@@ -354,9 +341,7 @@ pub fn render_graph_editor(gs: Rc<GraphSignals>) -> Dom {
 
         // Box select overlay in screen space (HTML div, outside SVG)
         .child(html!("div", {
-            .style("position", "absolute")
-            .style("pointer-events", "none")
-            .style("border", &format!("1px solid {}", gs.theme.box_select_border))
+            .dwclass!("absolute pointer-events-none border border-picton-blue-400")
             .style("background", gs.theme.box_select_fill)
             .style_signal("display", gs.box_select_rect.signal_cloned().map(|r| {
                 if r.is_some() { "block" } else { "none" }

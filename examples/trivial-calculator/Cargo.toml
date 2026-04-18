@@ -12,6 +12,7 @@ nodegraph-render = { path = "../../crates/nodegraph-render" }
 wasm-bindgen = { workspace = true }
 dominator = { workspace = true }
 dwind = { workspace = true }
+dwind-macros = { workspace = true }
 console_error_panic_hook = { workspace = true }
 nodegraph-widgets = { workspace = true }
 serde_json = { workspace = true }

@@ -5,11 +5,15 @@
 //!
 //! Run with: `trunk serve` from this directory.
 
+#[macro_use]
+extern crate dwind_macros;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use dominator::{clone, html};
+use dwind::prelude::*;
 use futures_signals::signal::{Mutable, SignalExt};
 use futures_signals::signal_vec::SignalVecExt;
 use wasm_bindgen::prelude::*;
@@ -282,11 +286,10 @@ pub fn main() {
                     let display_mutable = get_port_value(&pv, node_id, 0.0);
                     Some(html!("div", {
                         .attr("xmlns", "http://www.w3.org/1999/xhtml")
+                        .dwclass!("font-bold text-center")
                         .style("padding", "2px 14px")
                         .style("font-size", "14px")
-                        .style("font-weight", "bold")
                         .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-                        .style("text-align", "center")
                         // React to both value changes and connection changes
                         .child_signal(
                             futures_signals::map_ref! {
@@ -303,12 +306,12 @@ pub fn main() {
                                 });
                                 if has_input {
                                     Some(html!("span", {
-                                        .style("color", "#4a9eff")
+                                        .dwclass!("text-picton-blue-400")
                                         .text(&format!("{}", val))
                                     }))
                                 } else {
                                     Some(html!("span", {
-                                        .style("color", "#666")
+                                        .dwclass!("text-gray-500")
                                         .style("font-size", "11px")
                                         .text("[disconnected]")
                                     }))
@@ -372,47 +375,35 @@ pub fn main() {
     dominator::append_dom(
         &dominator::body(),
         html!("div", {
-            .style("display", "flex")
-            .style("width", "100%")
-            .style("height", "100%")
+            .dwclass!("flex w-full h-full")
 
             // Graph editor — takes remaining space
             .child(html!("div", {
-                .style("flex", "1")
+                .dwclass!("flex-1 h-full")
                 .style("min-width", "0")
-                .style("height", "100%")
                 .child(render_graph_editor(gs.clone()))
             }))
 
             // JSON panel — fixed width docked on right
             .child(html!("div", {
+                .dwclass!("h-full flex flex-col bg-bunker-900 border border-gray-700")
                 .style("width", "320px")
                 .style("flex-shrink", "0")
-                .style("height", "100%")
-                .style("background", "#12121f")
-                .style("border-left", "1px solid #333")
-                .style("display", "flex")
-                .style("flex-direction", "column")
+                .style("border-width", "0 0 0 1px")
                 .style("font-family", "monospace")
 
                 // Header
                 .child(html!("div", {
-                    .style("padding", "8px 12px")
+                    .dwclass!("py-2 px-3 font-bold text-gray-500 border border-gray-700")
                     .style("font-size", "11px")
-                    .style("font-weight", "bold")
-                    .style("color", "#888")
-                    .style("border-bottom", "1px solid #333")
+                    .style("border-width", "0 0 1px 0")
                     .style("flex-shrink", "0")
                     .text("Serialized Graph (live)")
                 }))
 
                 // JSON content — reactive over both node_list and connection_list
                 .child(html!("pre", {
-                    .style("flex", "1")
-                    .style("margin", "0")
-                    .style("padding", "8px 12px")
-                    .style("overflow-y", "auto")
-                    .style("color", "#8f8")
+                    .dwclass!("flex-1 m-0 py-2 px-3 overflow-y-auto text-green-300")
                     .style("font-size", "10px")
                     .style("line-height", "1.4")
                     .style("white-space", "pre-wrap")

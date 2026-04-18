@@ -357,16 +357,17 @@ fn drag_node_moves_position() {
 }
 
 #[test]
-fn pan_with_middle_mouse() {
+fn pan_with_left_mouse_on_empty_canvas() {
     let mut graph = make_test_graph();
     let mut ctrl = InteractionController::new();
 
-    let start = Vec2::new(400.0, 300.0);
+    // World coord far from all test-graph nodes (at (0,0), (300,0), (600,200)).
+    let start = Vec2::new(1000.0, 1000.0);
     ctrl.handle_event(
         InputEvent::MouseDown {
             screen: start,
             world: start,
-            button: MouseButton::Middle,
+            button: MouseButton::Left,
             modifiers: Modifiers::default(),
         },
         &mut graph,
@@ -374,7 +375,7 @@ fn pan_with_middle_mouse() {
 
     assert!(matches!(ctrl.state, InteractionState::Panning { .. }));
 
-    let moved = Vec2::new(450.0, 320.0);
+    let moved = Vec2::new(1050.0, 1020.0);
     ctrl.handle_event(
         InputEvent::MouseMove {
             screen: moved,
@@ -391,13 +392,35 @@ fn pan_with_middle_mouse() {
         InputEvent::MouseUp {
             screen: moved,
             world: moved,
-            button: MouseButton::Middle,
+            button: MouseButton::Left,
             modifiers: Modifiers::default(),
         },
         &mut graph,
     );
 
     assert!(matches!(ctrl.state, InteractionState::Idle));
+}
+
+#[test]
+fn shift_left_mouse_on_empty_canvas_box_selects() {
+    let mut graph = make_test_graph();
+    let mut ctrl = InteractionController::new();
+
+    let start = Vec2::new(1000.0, 1000.0);
+    ctrl.handle_event(
+        InputEvent::MouseDown {
+            screen: start,
+            world: start,
+            button: MouseButton::Left,
+            modifiers: Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            },
+        },
+        &mut graph,
+    );
+
+    assert!(matches!(ctrl.state, InteractionState::BoxSelecting { .. }));
 }
 
 // ============================================================
@@ -550,14 +573,18 @@ fn box_selection() {
     let mut graph = make_test_graph();
     let mut ctrl = InteractionController::new();
 
-    // Click on empty space to start box select
+    // Shift+click on empty space starts box select (plain LMB on empty canvas pans).
     let start = Vec2::new(-20.0, -20.0);
+    let shift = Modifiers {
+        shift: true,
+        ..Default::default()
+    };
     ctrl.handle_event(
         InputEvent::MouseDown {
             screen: start,
             world: start,
             button: MouseButton::Left,
-            modifiers: Modifiers::default(),
+            modifiers: shift,
         },
         &mut graph,
     );
@@ -570,7 +597,7 @@ fn box_selection() {
         InputEvent::MouseMove {
             screen: end,
             world: end,
-            modifiers: Modifiers::default(),
+            modifiers: shift,
         },
         &mut graph,
     );
@@ -585,7 +612,7 @@ fn box_selection() {
             screen: end,
             world: end,
             button: MouseButton::Left,
-            modifiers: Modifiers::default(),
+            modifiers: shift,
         },
         &mut graph,
     );
@@ -599,24 +626,36 @@ fn box_selection_shift_adds() {
     let mut graph = make_test_graph();
     let mut ctrl = InteractionController::new();
 
-    // First select nodes at (0,0) and (300,0)
+    // First select nodes at (0,0) and (300,0) via shift-box-select.
     let start = Vec2::new(-20.0, -20.0);
+    let shift = Modifiers {
+        shift: true,
+        ..Default::default()
+    };
     ctrl.handle_event(
         InputEvent::MouseDown {
             screen: start,
             world: start,
             button: MouseButton::Left,
-            modifiers: Modifiers::default(),
+            modifiers: shift,
         },
         &mut graph,
     );
     let end = Vec2::new(500.0, 150.0);
     ctrl.handle_event(
+        InputEvent::MouseMove {
+            screen: end,
+            world: end,
+            modifiers: shift,
+        },
+        &mut graph,
+    );
+    ctrl.handle_event(
         InputEvent::MouseUp {
             screen: end,
             world: end,
             button: MouseButton::Left,
-            modifiers: Modifiers::default(),
+            modifiers: shift,
         },
         &mut graph,
     );

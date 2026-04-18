@@ -1,26 +1,22 @@
 use std::rc::Rc;
 
 use dominator::{clone, events, html, Dom};
+use dwind::prelude::*;
 use futures_signals::map_ref;
 use futures_signals::signal::SignalExt;
 use wasm_bindgen::JsCast;
 
 use crate::graph_signals::GraphSignals;
 
+const FONT_STACK: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+
 pub fn render_context_menu(gs: &Rc<GraphSignals>) -> Dom {
     html!("div", {
-        .style("position", "absolute")
+        .dwclass!("absolute min-w-40 overflow-hidden rounded-md border border-gray-600 bg-bunker-800 text-xs text-gray-300 pointer-events-auto")
+        // z-index 110 is above dwind's scale; keep raw.
         .style("z-index", "110")
-        .style("min-width", "160px")
-        .style("background", gs.theme.menu_bg)
-        .style("border", &format!("1px solid {}", gs.theme.menu_border))
-        .style("border-radius", "6px")
-        .style("overflow", "hidden")
-        .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-        .style("font-size", "12px")
-        .style("color", gs.theme.menu_text)
+        .style("font-family", FONT_STACK)
         .style("box-shadow", gs.theme.menu_shadow)
-        .style("pointer-events", "auto")
 
         .attr("data-context-menu", "")
 
@@ -139,17 +135,16 @@ pub fn render_context_menu(gs: &Rc<GraphSignals>) -> Dom {
             Some(html!("div", {
                 .children(items.into_iter().map(|(label, action)| {
                     html!("div", {
-                        .style("padding", "6px 12px")
-                        .style("cursor", "pointer")
+                        .dwclass!("py-1.5 px-3 cursor-pointer")
                         .style("transition", "background 0.1s")
                         .event(clone!(action => move |_: events::Click| { (action)(); }))
-                        .event(|e: events::MouseEnter| {
+                        .event(clone!(gs => move |e: events::MouseEnter| {
                             if let Some(t) = e.target() {
                                 if let Ok(el) = t.dyn_into::<web_sys::HtmlElement>() {
-                                    el.style().set_property("background", "#3a3a5e").ok();
+                                    el.style().set_property("background", gs.theme.menu_selected_bg).ok();
                                 }
                             }
-                        })
+                        }))
                         .event(|e: events::MouseLeave| {
                             if let Some(t) = e.target() {
                                 if let Ok(el) = t.dyn_into::<web_sys::HtmlElement>() {

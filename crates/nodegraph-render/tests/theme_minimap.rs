@@ -60,21 +60,29 @@ async fn flush_microtasks() {
 
 #[wasm_bindgen_test]
 fn test_canvas_uses_theme_bg() {
+    // The canvas background now comes from `dwclass!("bg-bunker-900")` on the
+    // viewport root (see the dwind dwclass refactor). dwind emits a
+    // hash-suffixed class name into the stylesheet, so check the resolved
+    // computed style instead of the class literal.
     let gs = GraphSignals::new();
     let _tc = render_sync(&gs);
 
-    // dominator sets styles via JS style property, not style attribute.
-    let doc = web_sys::window().unwrap().document().unwrap();
+    let win = web_sys::window().unwrap();
+    let doc = win.document().unwrap();
     let all_divs = doc.query_selector_all("div").unwrap();
     let mut found = false;
     for i in 0..all_divs.length() {
         if let Some(el) = all_divs.get(i) {
             if let Ok(html_el) = el.dyn_into::<web_sys::HtmlElement>() {
-                let bg = html_el
-                    .style()
-                    .get_property_value("background")
+                let computed = match win.get_computed_style(&html_el) {
+                    Ok(Some(cs)) => cs,
+                    _ => continue,
+                };
+                let bg = computed
+                    .get_property_value("background-color")
                     .unwrap_or_default();
-                if bg.contains("26, 26, 46") || bg.contains("1a1a2e") {
+                // bunker-900 = #1C1C25. Browsers normalize hex to rgb().
+                if bg.contains("rgb(28, 28, 37)") {
                     found = true;
                     break;
                 }
@@ -83,7 +91,7 @@ fn test_canvas_uses_theme_bg() {
     }
     assert!(
         found,
-        "Should find a div with theme canvas_bg applied via style property"
+        "Should find a div whose computed background matches dwind bunker-900"
     );
 }
 

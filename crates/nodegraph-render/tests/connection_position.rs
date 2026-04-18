@@ -347,24 +347,26 @@ fn test_delete_node_removes_its_connections() {
 
 #[wasm_bindgen_test]
 fn test_pan() {
+    // Plain LMB-drag on empty canvas pans (see `feat(ui): LMB-drag pans`).
+    // World coord (700, 500) is past both nodes so hit_test returns Nothing.
     let (gs, _, _, _, _) = new_two_node_graph();
     let _tc = render_sync(&gs);
 
     gs.handle_input(InputEvent::MouseDown {
-        screen: Vec2::new(400.0, 300.0),
-        world: Vec2::new(400.0, 300.0),
-        button: MouseButton::Middle,
+        screen: Vec2::new(700.0, 500.0),
+        world: Vec2::new(700.0, 500.0),
+        button: MouseButton::Left,
         modifiers: Modifiers::default(),
     });
     gs.handle_input(InputEvent::MouseMove {
-        screen: Vec2::new(450.0, 320.0),
-        world: Vec2::new(450.0, 320.0),
+        screen: Vec2::new(750.0, 520.0),
+        world: Vec2::new(750.0, 520.0),
         modifiers: Modifiers::default(),
     });
     gs.handle_input(InputEvent::MouseUp {
-        screen: Vec2::new(450.0, 320.0),
-        world: Vec2::new(450.0, 320.0),
-        button: MouseButton::Middle,
+        screen: Vec2::new(750.0, 520.0),
+        world: Vec2::new(750.0, 520.0),
+        button: MouseButton::Left,
         modifiers: Modifiers::default(),
     });
 
@@ -716,13 +718,17 @@ fn test_box_selection_selects_contained_nodes() {
     let (gs, _n1, _n2, _, _) = new_two_node_graph();
     let _tc = render_sync(&gs);
 
-    // Start box select on empty space
+    // Shift+LMB on empty canvas starts box-select (plain LMB pans).
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::default()
+    };
     let start = Vec2::new(50.0, 50.0);
     gs.handle_input(InputEvent::MouseDown {
         screen: start,
         world: start,
         button: MouseButton::Left,
-        modifiers: Modifiers::default(),
+        modifiers: shift,
     });
 
     // Drag to cover both nodes (n1 at 100,100 and n2 at 400,100)
@@ -730,7 +736,7 @@ fn test_box_selection_selects_contained_nodes() {
     gs.handle_input(InputEvent::MouseMove {
         screen: end,
         world: end,
-        modifiers: Modifiers::default(),
+        modifiers: shift,
     });
 
     // Box select rect should be visible

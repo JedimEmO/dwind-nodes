@@ -183,9 +183,9 @@ dependencies = [
 
 [[package]]
 name = "dwind"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6492fc226df05d01f3ac64eb25d05723a4f20244af9b87163f5a0d22204677a3"
+checksum = "b8ab26c1272449ea1cf2e00de2abc5e4649d6501e576d735cd0377317371ba12"
 dependencies = [
  "const_format",
  "dominator",
@@ -791,6 +791,7 @@ dependencies = [
  "console_error_panic_hook",
  "dominator",
  "dwind",
+ "dwind-macros",
  "futures-signals",
  "js-sys",
  "nodegraph-core",
@@ -829,6 +830,7 @@ dependencies = [
  "console_error_panic_hook",
  "dominator",
  "dwind",
+ "dwind-macros",
  "futures-signals",
  "nodegraph-core",
  "nodegraph-render",

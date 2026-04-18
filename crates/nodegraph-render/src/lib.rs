@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate dwind_macros;
+
 pub mod graph_callbacks;
 pub mod graph_signals;
 pub mod theme;

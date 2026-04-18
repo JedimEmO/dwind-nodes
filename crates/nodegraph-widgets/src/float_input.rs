@@ -1,9 +1,12 @@
 use dominator::{clone, events, html, with_node, Dom, EventOptions};
+use dwind::prelude::*;
 use futures_signals::signal::{LocalBoxSignal, Mutable, SignalExt};
 use futures_signals_component_macro::component;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
+
+const FONT_STACK: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
 /// Trait for reading/writing a float value reactively.
 pub trait FloatValueWrapper {
@@ -83,26 +86,15 @@ pub fn float_input(props: FloatInputProps) -> Dom {
 
     html!("div", {
         .attr("data-port-widget", "")
-        .style("width", "100%")
-        .style("height", "16px")
-        .style("position", "relative")
-        .style("pointer-events", "auto")
+        .dwclass!("w-full h-4 relative pointer-events-auto")
         .style("user-select", "none")
 
         // Display mode: visible when NOT editing
         .child(html!("div", {
-            .style("width", "100%")
-            .style("height", "100%")
+            .dwclass!("w-full h-full rounded-sm flex items-center justify-center overflow-hidden text-gray-300")
             .style("background", "rgba(0,0,0,0.3)")
-            .style("border-radius", "2px")
             .style("font-size", "10px")
-            .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-            .style("color", "#ccc")
-            .style("display", "flex")
-            .style("align-items", "center")
-            .style("justify-content", "center")
-            .style("box-sizing", "border-box")
-            .style("overflow", "hidden")
+            .style("font-family", FONT_STACK)
             .style_signal("cursor", editing.signal().map(|e| if e { "text" } else { "ew-resize" }))
             .style_signal("display", editing.signal().map(|e| if e { "none" } else { "flex" }))
 
@@ -204,22 +196,11 @@ pub fn float_input(props: FloatInputProps) -> Dom {
         // Edit mode: text input, visible only when editing
         .child(html!("input" => HtmlInputElement, {
             .attr("type", "text")
-            .style("width", "100%")
-            .style("height", "100%")
-            .style("position", "absolute")
-            .style("top", "0")
-            .style("left", "0")
+            .dwclass!("w-full h-full absolute top-0 left-0 border border-picton-blue-400 rounded-sm text-white-50 px-1 text-center pointer-events-auto")
             .style("background", "rgba(0,0,0,0.5)")
-            .style("color", "#fff")
-            .style("border", "1px solid #4a9eff")
-            .style("border-radius", "2px")
             .style("font-size", "10px")
-            .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-            .style("padding", "0 4px")
-            .style("text-align", "center")
+            .style("font-family", FONT_STACK)
             .style("outline", "none")
-            .style("box-sizing", "border-box")
-            .style("pointer-events", "auto")
             .style_signal("display", editing.signal().map(|e| if e { "block" } else { "none" }))
             .with_node!(element => {
                 // When editing becomes true, focus and select all

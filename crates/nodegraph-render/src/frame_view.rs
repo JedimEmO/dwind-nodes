@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use dominator::{clone, events, html, svg, Dom, EventOptions};
+use dwind::prelude::*;
 use futures_signals::signal::{Mutable, SignalExt};
 use wasm_bindgen::JsCast;
 
@@ -8,6 +9,8 @@ use nodegraph_core::graph::frame::{FrameColor, FrameLabel};
 use nodegraph_core::store::EntityId;
 
 use crate::graph_signals::GraphSignals;
+
+const FONT_STACK: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
 pub fn render_frame(frame_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
     let (label, color) = gs.with_graph(|g| {
@@ -75,18 +78,13 @@ pub fn render_frame(frame_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                         .attr("xmlns", "http://www.w3.org/1999/xhtml")
                         .attr("type", "text")
                         .attr("value", &label_text.get_cloned())
-                        .style("width", "100%")
-                        .style("height", "20px")
+                        .dwclass!("w-full h-5 px-2 font-bold pointer-events-auto")
                         .style("background", "rgba(0,0,0,0.5)")
                         .style("color", &format!("rgb({},{},{})", r, g, b))
                         .style("border", "none")
                         .style("outline", "none")
                         .style("font-size", "11px")
-                        .style("font-weight", "bold")
-                        .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-                        .style("padding", "0 8px")
-                        .style("box-sizing", "border-box")
-                        .style("pointer-events", "auto")
+                        .style("font-family", FONT_STACK)
                         .focused(true)
                         .event(clone!(gs, editing, label_text, frame_id => move |e: events::FocusOut| {
                             if let Some(target) = e.target() {
@@ -116,14 +114,12 @@ pub fn render_frame(frame_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                     // Static label — double-click to edit
                     Some(html!("div", {
                         .attr("xmlns", "http://www.w3.org/1999/xhtml")
+                        .dwclass!("pl-2 font-bold pointer-events-auto")
                         .style("color", &format!("rgb({},{},{})", r, g, b))
                         .style("font-size", "11px")
-                        .style("font-weight", "bold")
-                        .style("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
-                        .style("padding-left", "8px")
+                        .style("font-family", FONT_STACK)
                         .style("line-height", "20px")
                         .style("cursor", "text")
-                        .style("pointer-events", "auto")
                         .style("user-select", "none")
                         .text_signal(label_text.signal_cloned())
                         .event(clone!(editing => move |_: events::DoubleClick| {
