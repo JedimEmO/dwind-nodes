@@ -120,7 +120,7 @@ pub fn render_frame(frame_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                         .style("font-family", FONT_STACK)
                         .style("line-height", "20px")
                         .style("cursor", "text")
-                        .style("user-select", "none")
+                        .style_unchecked("user-select", "none")
                         .text_signal(label_text.signal_cloned())
                         .event(clone!(editing => move |_: events::DoubleClick| {
                             editing.set(true);

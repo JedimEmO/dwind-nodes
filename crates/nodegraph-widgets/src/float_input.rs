@@ -87,7 +87,7 @@ pub fn float_input(props: FloatInputProps) -> Dom {
     html!("div", {
         .attr("data-port-widget", "")
         .dwclass!("w-full h-4 relative pointer-events-auto")
-        .style("user-select", "none")
+        .style_unchecked("user-select", "none")
 
         // Display mode: visible when NOT editing
         .child(html!("div", {

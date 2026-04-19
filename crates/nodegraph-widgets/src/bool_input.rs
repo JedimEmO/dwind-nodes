@@ -52,7 +52,7 @@ pub fn bool_input(props: BoolInputProps) -> Dom {
     html!("div", {
         .attr("data-port-widget", "")
         .dwclass!("w-full h-4 flex items-center justify-center pointer-events-auto")
-        .style("user-select", "none")
+        .style_unchecked("user-select", "none")
 
         .child(html!("div", {
             .dwclass!("rounded-sm border border-gray-600")

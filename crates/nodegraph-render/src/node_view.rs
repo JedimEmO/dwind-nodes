@@ -193,7 +193,7 @@ pub fn render_node(node_id: EntityId, gs: &Rc<GraphSignals>) -> Dom {
                 .attr("xmlns", "http://www.w3.org/1999/xhtml")
                 .dwclass!("w-full h-full pointer-events-none")
                 .style("font-family", FONT_STACK)
-                .style("user-select", "none")
+                .style_unchecked("user-select", "none")
 
                 // Header
                 .child(html!("div", {

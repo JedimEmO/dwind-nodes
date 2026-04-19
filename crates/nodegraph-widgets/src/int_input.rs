@@ -83,7 +83,7 @@ pub fn int_input(props: IntInputProps) -> Dom {
     html!("div", {
         .attr("data-port-widget", "")
         .dwclass!("w-full h-4 relative pointer-events-auto")
-        .style("user-select", "none")
+        .style_unchecked("user-select", "none")
 
         .child(html!("div", {
             .dwclass!("w-full h-full rounded-sm flex items-center justify-center overflow-hidden text-gray-300")
