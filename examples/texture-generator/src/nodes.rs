@@ -2,6 +2,30 @@ use nodegraph_core::search::NodeTypeRegistry;
 use nodegraph_core::{NodeTypeDefinition, PortDefinition, PortDirection, SocketType};
 
 pub fn register_all(reg: &mut NodeTypeRegistry) {
+    // === Constants ===
+    //
+    // Standalone value nodes. Their single output port carries an editable
+    // widget and can fan out to many downstream inputs.
+
+    for (type_id, display_name, socket) in [
+        ("const_float", "Float", SocketType::Float),
+        ("const_int", "Integer", SocketType::Int),
+        ("const_bool", "Boolean", SocketType::Bool),
+        ("const_string", "String", SocketType::String),
+    ] {
+        reg.register(NodeTypeDefinition {
+            type_id: type_id.into(),
+            display_name: display_name.into(),
+            category: "Constant".into(),
+            input_ports: vec![],
+            output_ports: vec![PortDefinition {
+                direction: PortDirection::Output,
+                socket_type: socket,
+                label: "Value".into(),
+            }],
+        });
+    }
+
     // === Generators ===
 
     reg.register(NodeTypeDefinition {
@@ -33,7 +57,7 @@ pub fn register_all(reg: &mut NodeTypeRegistry) {
             },
             PortDefinition {
                 direction: PortDirection::Input,
-                socket_type: SocketType::Float,
+                socket_type: SocketType::Int,
                 label: "Size".into(),
             },
         ],
@@ -56,7 +80,7 @@ pub fn register_all(reg: &mut NodeTypeRegistry) {
             },
             PortDefinition {
                 direction: PortDirection::Input,
-                socket_type: SocketType::Float,
+                socket_type: SocketType::Int,
                 label: "Seed".into(),
             },
         ],
@@ -107,8 +131,13 @@ pub fn register_all(reg: &mut NodeTypeRegistry) {
             },
             PortDefinition {
                 direction: PortDirection::Input,
-                socket_type: SocketType::Float,
+                socket_type: SocketType::Int,
                 label: "Rows".into(),
+            },
+            PortDefinition {
+                direction: PortDirection::Input,
+                socket_type: SocketType::Bool,
+                label: "Stagger".into(),
             },
         ],
         output_ports: vec![PortDefinition {
@@ -362,10 +391,27 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    fn register_all_fifteen_types() {
+    fn register_all_node_types() {
         let reg = make_registry();
-        // 5 generators + 5 filters + 3 outputs + 2 group IO = 15
-        assert_eq!(reg.all().len(), 15);
+        // 4 constants + 5 generators + 6 filters + 4 outputs + 2 group IO = 21
+        assert_eq!(reg.all().len(), 21);
+    }
+
+    #[wasm_bindgen_test]
+    fn const_nodes_registered() {
+        let reg = make_registry();
+        for (tid, st) in [
+            ("const_float", SocketType::Float),
+            ("const_int", SocketType::Int),
+            ("const_bool", SocketType::Bool),
+            ("const_string", SocketType::String),
+        ] {
+            let def = reg.get(tid).unwrap_or_else(|| panic!("{tid} not found"));
+            assert!(def.input_ports.is_empty(), "{tid} should have no inputs");
+            assert_eq!(def.output_ports.len(), 1);
+            assert_eq!(def.output_ports[0].label, "Value");
+            assert_eq!(def.output_ports[0].socket_type, st);
+        }
     }
 
     #[wasm_bindgen_test]
@@ -382,7 +428,7 @@ mod tests {
         assert_eq!(checker.input_ports[1].socket_type, SocketType::Color);
 
         assert_eq!(checker.input_ports[2].label, "Size");
-        assert_eq!(checker.input_ports[2].socket_type, SocketType::Float);
+        assert_eq!(checker.input_ports[2].socket_type, SocketType::Int);
 
         assert_eq!(checker.output_ports.len(), 1);
         assert_eq!(checker.output_ports[0].label, "Texture");

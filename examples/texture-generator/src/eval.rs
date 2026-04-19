@@ -15,7 +15,25 @@ use crate::texture::{TextureBuffer, TEX_SIZE};
 /// Used by group node evaluation and testing.
 pub struct ParamSnapshot {
     pub floats: HashMap<EntityId, f64>,
+    pub ints: HashMap<EntityId, i64>,
+    pub bools: HashMap<EntityId, bool>,
+    // Kept for symmetry with ParamStore; no node currently consumes strings.
+    #[allow(dead_code)]
+    pub strings: HashMap<EntityId, String>,
     pub colors: HashMap<EntityId, [u8; 4]>,
+}
+
+impl ParamSnapshot {
+    #[cfg(test)]
+    pub fn empty() -> Self {
+        Self {
+            floats: HashMap::new(),
+            ints: HashMap::new(),
+            bools: HashMap::new(),
+            strings: HashMap::new(),
+            colors: HashMap::new(),
+        }
+    }
 }
 
 pub struct EvalResult {
@@ -31,15 +49,27 @@ pub fn evaluate(editor: &GraphEditor, snap: &ParamSnapshot) -> EvalResult {
     let mut textures: HashMap<EntityId, Rc<TextureBuffer>> = HashMap::new();
     let mut colors: HashMap<EntityId, [u8; 4]> = HashMap::new();
     let mut floats: HashMap<EntityId, f64> = HashMap::new();
+    let mut ints: HashMap<EntityId, i64> = HashMap::new();
+    let mut bools: HashMap<EntityId, bool> = HashMap::new();
 
     let root_id = editor.root_graph_id();
     let graph = editor.graph(root_id).expect("root graph");
 
-    eval_graph(graph, editor, snap, &mut textures, &mut colors, &mut floats);
+    eval_graph(
+        graph,
+        editor,
+        snap,
+        &mut textures,
+        &mut colors,
+        &mut floats,
+        &mut ints,
+        &mut bools,
+    );
 
     EvalResult { textures, colors }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn eval_graph(
     graph: &NodeGraph,
     editor: &GraphEditor,
@@ -47,13 +77,15 @@ fn eval_graph(
     textures: &mut HashMap<EntityId, Rc<TextureBuffer>>,
     colors: &mut HashMap<EntityId, [u8; 4]>,
     floats: &mut HashMap<EntityId, f64>,
+    ints: &mut HashMap<EntityId, i64>,
+    bools: &mut HashMap<EntityId, bool>,
 ) {
     let eval_order = graph.eval_order();
 
     for node_id in eval_order {
         if let Some(sub_root) = graph.world.get::<SubgraphRoot>(node_id) {
             eval_group_node(
-                node_id, sub_root.0, graph, editor, snap, textures, colors, floats,
+                node_id, sub_root.0, graph, editor, snap, textures, colors, floats, ints, bools,
             );
             continue;
         }
@@ -68,7 +100,9 @@ fn eval_graph(
             .map(|t| t.0.clone())
             .unwrap_or_default();
 
-        eval_node(node_id, &type_id, graph, snap, textures, colors, floats);
+        eval_node(
+            node_id, &type_id, graph, snap, textures, colors, floats, ints, bools,
+        );
     }
 }
 
@@ -82,6 +116,8 @@ fn eval_group_node(
     textures: &mut HashMap<EntityId, Rc<TextureBuffer>>,
     colors: &mut HashMap<EntityId, [u8; 4]>,
     floats: &mut HashMap<EntityId, f64>,
+    ints: &mut HashMap<EntityId, i64>,
+    bools: &mut HashMap<EntityId, bool>,
 ) {
     let subgraph = match editor.graph(subgraph_id) {
         Some(g) => g,
@@ -89,7 +125,7 @@ fn eval_group_node(
     };
 
     // Map group node input port values → subgraph Group Input IO node output ports.
-    // Forward all value types: textures, colors, AND floats.
+    // Forward all value types: textures, colors, floats, ints, bools.
     for &gport in parent_graph.node_ports(group_node_id) {
         let dir = parent_graph
             .world
@@ -104,6 +140,10 @@ fn eval_group_node(
         let upstream_tex = find_upstream(gport, parent_graph, textures);
         let upstream_float =
             find_upstream(gport, parent_graph, floats).or_else(|| snap.floats.get(&gport).copied());
+        let upstream_int =
+            find_upstream(gport, parent_graph, ints).or_else(|| snap.ints.get(&gport).copied());
+        let upstream_bool =
+            find_upstream(gport, parent_graph, bools).or_else(|| snap.bools.get(&gport).copied());
 
         for (&(sid, io_port), &mapped_gport) in &editor.io_port_mapping {
             if sid != subgraph_id || mapped_gport != gport {
@@ -118,6 +158,12 @@ fn eval_group_node(
             }
             if let Some(f) = upstream_float {
                 floats.insert(io_port, f);
+            }
+            if let Some(i) = upstream_int {
+                ints.insert(io_port, i);
+            }
+            if let Some(b) = upstream_bool {
+                bools.insert(io_port, b);
             }
         }
     }
@@ -138,6 +184,8 @@ fn eval_group_node(
                 textures,
                 colors,
                 floats,
+                ints,
+                bools,
             );
             continue;
         }
@@ -154,6 +202,8 @@ fn eval_group_node(
             textures,
             colors,
             floats,
+            ints,
+            bools,
         );
     }
 
@@ -182,6 +232,12 @@ fn eval_group_node(
             if let Some(f) = find_upstream(io_port, subgraph, floats) {
                 floats.insert(gport, f);
             }
+            if let Some(i) = find_upstream(io_port, subgraph, ints) {
+                ints.insert(gport, i);
+            }
+            if let Some(b) = find_upstream(io_port, subgraph, bools) {
+                bools.insert(gport, b);
+            }
         }
     }
 }
@@ -207,6 +263,7 @@ fn find_upstream<T: Clone>(
 }
 
 /// Evaluate a single non-group node. Stores results keyed by output port ID.
+#[allow(clippy::too_many_arguments)]
 fn eval_node(
     node_id: EntityId,
     type_id: &str,
@@ -215,6 +272,8 @@ fn eval_node(
     textures: &mut HashMap<EntityId, Rc<TextureBuffer>>,
     colors: &mut HashMap<EntityId, [u8; 4]>,
     floats: &mut HashMap<EntityId, f64>,
+    ints: &mut HashMap<EntityId, i64>,
+    bools: &mut HashMap<EntityId, bool>,
 ) {
     let get_input_texture = |label: &str| -> Option<Rc<TextureBuffer>> {
         for &pid in graph.node_ports(node_id) {
@@ -247,14 +306,76 @@ fn eval_node(
             if pl != label {
                 continue;
             }
-            // Check connected upstream float first (for group IO forwarding)
+            // Connected upstream wins over the param default; accept Float, Int→cast, Bool→0/1.
             if let Some(f) = find_upstream(pid, graph, floats) {
                 return f;
+            }
+            if let Some(i) = find_upstream(pid, graph, ints) {
+                return i as f64;
+            }
+            if let Some(b) = find_upstream(pid, graph, bools) {
+                return if b { 1.0 } else { 0.0 };
             }
             let default = crate::params::default_float(type_id, label);
             return snap.floats.get(&pid).copied().unwrap_or(default);
         }
         0.0
+    };
+
+    let get_int = |label: &str| -> i64 {
+        for &pid in graph.node_ports(node_id) {
+            if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) {
+                continue;
+            }
+            let pl = graph
+                .world
+                .get::<PortLabel>(pid)
+                .map(|l| l.0.as_str())
+                .unwrap_or("");
+            if pl != label {
+                continue;
+            }
+            if let Some(i) = find_upstream(pid, graph, ints) {
+                return i;
+            }
+            if let Some(f) = find_upstream(pid, graph, floats) {
+                return f as i64;
+            }
+            if let Some(b) = find_upstream(pid, graph, bools) {
+                return i64::from(b);
+            }
+            let default = crate::params::default_int(type_id, label);
+            return snap.ints.get(&pid).copied().unwrap_or(default);
+        }
+        0
+    };
+
+    let get_bool = |label: &str| -> bool {
+        for &pid in graph.node_ports(node_id) {
+            if graph.world.get::<PortDirection>(pid).copied() != Some(PortDirection::Input) {
+                continue;
+            }
+            let pl = graph
+                .world
+                .get::<PortLabel>(pid)
+                .map(|l| l.0.as_str())
+                .unwrap_or("");
+            if pl != label {
+                continue;
+            }
+            if let Some(b) = find_upstream(pid, graph, bools) {
+                return b;
+            }
+            if let Some(i) = find_upstream(pid, graph, ints) {
+                return i != 0;
+            }
+            if let Some(f) = find_upstream(pid, graph, floats) {
+                return f != 0.0;
+            }
+            let default = crate::params::default_bool(type_id, label);
+            return snap.bools.get(&pid).copied().unwrap_or(default);
+        }
+        false
     };
 
     let get_color = |label: &str| -> [u8; 4] {
@@ -293,31 +414,62 @@ fn eval_node(
             }
         };
 
+    let output_ports = || {
+        graph.node_ports(node_id).iter().copied().filter(|&pid| {
+            graph.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Output)
+        })
+    };
+
     match type_id {
         "solid_color" => {
-            for &pid in graph.node_ports(node_id) {
-                if graph.world.get::<PortDirection>(pid).copied() == Some(PortDirection::Output) {
-                    let default = crate::params::default_color("solid_color", "Color");
-                    let color = snap.colors.get(&pid).copied().unwrap_or(default);
-                    colors.insert(pid, color);
-                }
+            for pid in output_ports() {
+                let default = crate::params::default_color("solid_color", "Color");
+                let color = snap.colors.get(&pid).copied().unwrap_or(default);
+                colors.insert(pid, color);
             }
         }
+        "const_float" => {
+            for pid in output_ports() {
+                let default = crate::params::default_float("const_float", "Value");
+                let v = snap.floats.get(&pid).copied().unwrap_or(default);
+                floats.insert(pid, v);
+            }
+        }
+        "const_int" => {
+            for pid in output_ports() {
+                let default = crate::params::default_int("const_int", "Value");
+                let v = snap.ints.get(&pid).copied().unwrap_or(default);
+                ints.insert(pid, v);
+            }
+        }
+        "const_bool" => {
+            for pid in output_ports() {
+                let default = crate::params::default_bool("const_bool", "Value");
+                let v = snap.bools.get(&pid).copied().unwrap_or(default);
+                bools.insert(pid, v);
+            }
+        }
+        "const_string" => {
+            // No node currently consumes strings, so we don't need to write anywhere.
+            // Widget editing keeps the ParamStore in sync; snapshotting propagates it.
+            let _ = output_ports;
+        }
         "checker" => store_texture(
-            eval_checker(
-                get_color("Color A"),
-                get_color("Color B"),
-                get_float("Size"),
-            ),
+            eval_checker(get_color("Color A"), get_color("Color B"), get_int("Size")),
             textures,
         ),
-        "noise" => store_texture(eval_noise(get_float("Scale"), get_float("Seed")), textures),
+        "noise" => store_texture(eval_noise(get_float("Scale"), get_int("Seed")), textures),
         "gradient" => store_texture(
             eval_gradient(get_color("Color A"), get_color("Color B")),
             textures,
         ),
         "brick" => store_texture(
-            eval_brick(get_color("Mortar"), get_color("Brick"), get_float("Rows")),
+            eval_brick(
+                get_color("Mortar"),
+                get_color("Brick"),
+                get_int("Rows"),
+                get_bool("Stagger"),
+            ),
             textures,
         ),
         "mix" => store_texture(
@@ -372,9 +524,9 @@ fn eval_node(
 // Texture generation functions
 // ============================================================
 
-pub(crate) fn eval_checker(color_a: [u8; 4], color_b: [u8; 4], size: f64) -> TextureBuffer {
+pub(crate) fn eval_checker(color_a: [u8; 4], color_b: [u8; 4], size: i64) -> TextureBuffer {
     let mut tex = TextureBuffer::new();
-    let cell = (size as usize).max(1);
+    let cell = (size.max(1)) as usize;
     for y in 0..TEX_SIZE {
         for x in 0..TEX_SIZE {
             let checker = ((x / cell) + (y / cell)).is_multiple_of(2);
@@ -384,9 +536,9 @@ pub(crate) fn eval_checker(color_a: [u8; 4], color_b: [u8; 4], size: f64) -> Tex
     tex
 }
 
-pub(crate) fn eval_noise(scale: f64, seed: f64) -> TextureBuffer {
+pub(crate) fn eval_noise(scale: f64, seed: i64) -> TextureBuffer {
     let mut tex = TextureBuffer::new();
-    let seed_bits = (seed * 12345.6789) as u32;
+    let seed_bits = (seed as u32).wrapping_mul(12345).wrapping_add(6789);
     for y in 0..TEX_SIZE {
         for x in 0..TEX_SIZE {
             let v = value_noise(
@@ -437,15 +589,24 @@ pub(crate) fn eval_gradient(color_a: [u8; 4], color_b: [u8; 4]) -> TextureBuffer
     tex
 }
 
-pub(crate) fn eval_brick(mortar: [u8; 4], brick: [u8; 4], rows: f64) -> TextureBuffer {
+pub(crate) fn eval_brick(
+    mortar: [u8; 4],
+    brick: [u8; 4],
+    rows: i64,
+    stagger: bool,
+) -> TextureBuffer {
     let mut tex = TextureBuffer::new();
-    let row_count = (rows as usize).max(1);
+    let row_count = (rows.max(1)) as usize;
     let row_h = TEX_SIZE / row_count;
     let mortar_w = 1;
     for y in 0..TEX_SIZE {
         let row = y / row_h.max(1);
         let is_mortar_row = row_h > 1 && (y % row_h.max(1)) < mortar_w;
-        let offset = if row % 2 == 1 { TEX_SIZE / 2 } else { 0 };
+        let offset = if stagger && row % 2 == 1 {
+            TEX_SIZE / 2
+        } else {
+            0
+        };
         for x in 0..TEX_SIZE {
             let bx = (x + offset) % TEX_SIZE;
             let is_mortar_col = bx < mortar_w || bx >= TEX_SIZE - mortar_w;
@@ -640,7 +801,7 @@ mod tests {
     fn checker_alternating() {
         let white = [255, 255, 255, 255];
         let black = [0, 0, 0, 255];
-        let tex = eval_checker(white, black, 4.0);
+        let tex = eval_checker(white, black, 4);
         // (0,0) -> cell (0+0)=0, even -> color_a
         assert_eq!(tex.data[0], white, "(0,0) should be color_a");
         // (4,0) -> cell (1+0)=1, odd -> color_b
@@ -650,21 +811,21 @@ mod tests {
     #[wasm_bindgen_test]
     fn checker_size_zero_clamps() {
         // size=0 should clamp to cell=1 and not panic
-        let tex = eval_checker([255, 0, 0, 255], [0, 255, 0, 255], 0.0);
+        let tex = eval_checker([255, 0, 0, 255], [0, 255, 0, 255], 0);
         assert_eq!(tex.data.len(), TEX_SIZE * TEX_SIZE);
     }
 
     #[wasm_bindgen_test]
     fn noise_deterministic() {
-        let a = eval_noise(5.0, 1.0);
-        let b = eval_noise(5.0, 1.0);
+        let a = eval_noise(5.0, 1);
+        let b = eval_noise(5.0, 1);
         assert_eq!(a.data, b.data, "same params must produce identical buffers");
     }
 
     #[wasm_bindgen_test]
     fn noise_different_seeds() {
-        let a = eval_noise(5.0, 1.0);
-        let b = eval_noise(5.0, 2.0);
+        let a = eval_noise(5.0, 1);
+        let b = eval_noise(5.0, 2);
         assert_ne!(
             a.data, b.data,
             "different seeds must produce different output"
@@ -686,11 +847,23 @@ mod tests {
     fn brick_has_mortar() {
         let mortar = [200, 200, 200, 255];
         let brick = [160, 80, 60, 255];
-        let tex = eval_brick(mortar, brick, 4.0);
+        let tex = eval_brick(mortar, brick, 4, true);
         let mortar_count = tex.data.iter().filter(|&&px| px == mortar).count();
         assert!(mortar_count > 0, "brick texture must contain mortar pixels");
         let brick_count = tex.data.iter().filter(|&&px| px == brick).count();
         assert!(brick_count > 0, "brick texture must contain brick pixels");
+    }
+
+    #[wasm_bindgen_test]
+    fn brick_stagger_toggles_offset() {
+        let mortar = [200, 200, 200, 255];
+        let brick = [160, 80, 60, 255];
+        let staggered = eval_brick(mortar, brick, 4, true);
+        let aligned = eval_brick(mortar, brick, 4, false);
+        assert_ne!(
+            staggered.data, aligned.data,
+            "stagger toggle must change the output"
+        );
     }
 
     // ============================================================
@@ -778,7 +951,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn invert_roundtrip() {
-        let original = eval_noise(5.0, 1.0);
+        let original = eval_noise(5.0, 1);
         let inverted = eval_invert(Some(Rc::new(original.clone())));
         let double_inverted = eval_invert(Some(Rc::new(inverted)));
         assert_eq!(
@@ -845,16 +1018,13 @@ mod tests {
             &[
                 (PortDirection::Input, SocketType::Color, "Color A"),
                 (PortDirection::Input, SocketType::Color, "Color B"),
-                (PortDirection::Input, SocketType::Float, "Size"),
+                (PortDirection::Input, SocketType::Int, "Size"),
                 (PortDirection::Output, SocketType::Image, "Texture"),
             ],
         );
         let output_port = ports[3];
 
-        let snap = ParamSnapshot {
-            floats: HashMap::new(),
-            colors: HashMap::new(),
-        };
+        let snap = ParamSnapshot::empty();
         let result = evaluate(&editor, &snap);
         assert!(
             result.textures.contains_key(&output_port),
@@ -875,7 +1045,7 @@ mod tests {
             "noise",
             &[
                 (PortDirection::Input, SocketType::Float, "Scale"),
-                (PortDirection::Input, SocketType::Float, "Seed"),
+                (PortDirection::Input, SocketType::Int, "Seed"),
                 (PortDirection::Output, SocketType::Image, "Texture"),
             ],
         );
@@ -898,10 +1068,7 @@ mod tests {
             .connect(noise_out, invert_in)
             .expect("connect");
 
-        let snap = ParamSnapshot {
-            floats: HashMap::new(),
-            colors: HashMap::new(),
-        };
+        let snap = ParamSnapshot::empty();
         let result = evaluate(&editor, &snap);
 
         let noise_tex = &result.textures[&noise_out];
@@ -942,10 +1109,7 @@ mod tests {
         );
         let invert_out = invert_ports[1];
 
-        let snap = ParamSnapshot {
-            floats: HashMap::new(),
-            colors: HashMap::new(),
-        };
+        let snap = ParamSnapshot::empty();
         let result = evaluate(&editor, &snap);
 
         let tex = &result.textures[&invert_out];
@@ -965,7 +1129,7 @@ mod tests {
             "noise",
             &[
                 (PortDirection::Input, SocketType::Float, "Scale"),
-                (PortDirection::Input, SocketType::Float, "Seed"),
+                (PortDirection::Input, SocketType::Int, "Seed"),
                 (PortDirection::Output, SocketType::Image, "Texture"),
             ],
         );
@@ -1003,10 +1167,7 @@ mod tests {
             .connect(b_out, c_in)
             .expect("connect B->C");
 
-        let snap = ParamSnapshot {
-            floats: HashMap::new(),
-            colors: HashMap::new(),
-        };
+        let snap = ParamSnapshot::empty();
         let result = evaluate(&editor, &snap);
 
         let a_tex = &result.textures[&a_out];
@@ -1020,14 +1181,123 @@ mod tests {
     #[wasm_bindgen_test]
     fn eval_empty_graph() {
         let editor = GraphEditor::new();
-        let snap = ParamSnapshot {
-            floats: HashMap::new(),
-            colors: HashMap::new(),
-        };
+        let snap = ParamSnapshot::empty();
         let result = evaluate(&editor, &snap);
         assert!(
             result.textures.is_empty(),
             "empty graph must produce empty result"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn const_bool_converts_to_float_input() {
+        // const_bool(Value=true) -> threshold.Level (Float): true should become 1.0
+        // threshold with level=1.0 yields all-black for a mid-gray input.
+        let mut editor = GraphEditor::new();
+        let (_c_id, c_ports) = make_node(
+            &mut editor,
+            "K",
+            "const_bool",
+            &[(PortDirection::Output, SocketType::Bool, "Value")],
+        );
+
+        // Stand-in upstream texture: use a noise node (deterministic mid-range).
+        let (_n_id, n_ports) = make_node(
+            &mut editor,
+            "N",
+            "noise",
+            &[
+                (PortDirection::Input, SocketType::Float, "Scale"),
+                (PortDirection::Input, SocketType::Int, "Seed"),
+                (PortDirection::Output, SocketType::Image, "Texture"),
+            ],
+        );
+        let (_t_id, t_ports) = make_node(
+            &mut editor,
+            "T",
+            "threshold",
+            &[
+                (PortDirection::Input, SocketType::Image, "Texture"),
+                (PortDirection::Input, SocketType::Float, "Level"),
+                (PortDirection::Output, SocketType::Image, "Texture"),
+            ],
+        );
+
+        let const_out = c_ports[0];
+        let noise_out = n_ports[2];
+        let tex_in = t_ports[0];
+        let level_in = t_ports[1];
+        let t_out = t_ports[2];
+
+        editor
+            .current_graph_mut()
+            .connect(noise_out, tex_in)
+            .expect("connect noise -> threshold");
+        editor
+            .current_graph_mut()
+            .connect(const_out, level_in)
+            .expect("connect const_bool -> Level");
+
+        let mut snap = ParamSnapshot::empty();
+        snap.bools.insert(const_out, true);
+
+        let result = evaluate(&editor, &snap);
+        let tex = &result.textures[&t_out];
+        // level=1.0 -> threshold=255, luminance < 255 -> all black.
+        for px in &tex.data {
+            assert_eq!(
+                px[0], 0,
+                "bool(true) must convert to float 1.0 via connection"
+            );
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn const_int_drives_checker_size() {
+        // Build: const_int(Value=2) -> checker.Size
+        // Size=2 produces visibly different alternation than the default (4).
+        let mut editor = GraphEditor::new();
+        let (_c_id, c_ports) = make_node(
+            &mut editor,
+            "K",
+            "const_int",
+            &[(PortDirection::Output, SocketType::Int, "Value")],
+        );
+        let (_checker_id, checker_ports) = make_node(
+            &mut editor,
+            "Checker",
+            "checker",
+            &[
+                (PortDirection::Input, SocketType::Color, "Color A"),
+                (PortDirection::Input, SocketType::Color, "Color B"),
+                (PortDirection::Input, SocketType::Int, "Size"),
+                (PortDirection::Output, SocketType::Image, "Texture"),
+            ],
+        );
+
+        let const_out = c_ports[0];
+        let size_in = checker_ports[2];
+        let tex_out = checker_ports[3];
+        editor
+            .current_graph_mut()
+            .connect(const_out, size_in)
+            .expect("connect const_int -> Size");
+
+        let mut snap = ParamSnapshot::empty();
+        snap.ints.insert(const_out, 2);
+
+        let result = evaluate(&editor, &snap);
+        let tex_size_2 = result.textures[&tex_out].clone();
+
+        // Compare against direct eval with size=2 — must match.
+        let expected = Rc::new(eval_checker(
+            crate::params::default_color("checker", "Color A"),
+            crate::params::default_color("checker", "Color B"),
+            2,
+        ));
+        assert_eq!(
+            tex_size_2.data, expected.data,
+            "const_int output must drive checker.Size through the connection"
         );
     }
 }

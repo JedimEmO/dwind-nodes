@@ -1,0 +1,15 @@
+[package]
+name = "nodegraph-runtime"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+nodegraph-core = { workspace = true }
+nodegraph-render = { workspace = true }
+futures-signals = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

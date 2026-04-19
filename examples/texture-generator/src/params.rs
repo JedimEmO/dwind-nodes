@@ -1,87 +1,47 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
-use dominator::{clone, events, html};
-use dwind::prelude::*;
-use futures_signals::signal::{Mutable, SignalExt};
-use wasm_bindgen::JsCast;
-
-use nodegraph_core::{EntityId, PortDirection, SocketType};
+use nodegraph_core::types::socket_type::SocketType;
+use nodegraph_core::{EntityId, PortDirection};
 use nodegraph_render::GraphSignals;
-use nodegraph_widgets::float_input::{float_input, FloatInputProps};
-
-pub struct ParamStore {
-    floats: RefCell<HashMap<EntityId, Mutable<f64>>>,
-    colors: RefCell<HashMap<EntityId, Mutable<[u8; 4]>>>,
-}
-
-impl ParamStore {
-    pub fn new() -> Rc<Self> {
-        Rc::new(Self {
-            floats: RefCell::new(HashMap::new()),
-            colors: RefCell::new(HashMap::new()),
-        })
-    }
-
-    pub fn get_float(&self, port_id: EntityId, default: f64) -> Mutable<f64> {
-        self.floats
-            .borrow_mut()
-            .entry(port_id)
-            .or_insert_with(|| Mutable::new(default))
-            .clone()
-    }
-
-    pub fn get_color(&self, port_id: EntityId, default: [u8; 4]) -> Mutable<[u8; 4]> {
-        self.colors
-            .borrow_mut()
-            .entry(port_id)
-            .or_insert_with(|| Mutable::new(default))
-            .clone()
-    }
-
-    /// Migrate param values from old port IDs to new port IDs.
-    /// Used after group/ungroup which recreates ports with fresh EntityIds.
-    pub fn migrate_ports(&self, old_to_new: &HashMap<EntityId, EntityId>) {
-        let mut floats = self.floats.borrow_mut();
-        for (old_id, new_id) in old_to_new {
-            if let Some(m) = floats.get(old_id).cloned() {
-                floats.insert(*new_id, m);
-            }
-        }
-        drop(floats);
-        let mut colors = self.colors.borrow_mut();
-        for (old_id, new_id) in old_to_new {
-            if let Some(m) = colors.get(old_id).cloned() {
-                colors.insert(*new_id, m);
-            }
-        }
-    }
-
-    /// Snapshot all current param values into plain HashMaps (for group node evaluation).
-    pub fn snapshot(&self) -> crate::eval::ParamSnapshot {
-        let floats = self.floats.borrow();
-        let colors = self.colors.borrow();
-        crate::eval::ParamSnapshot {
-            floats: floats.iter().map(|(&k, v)| (k, v.get())).collect(),
-            colors: colors.iter().map(|(&k, v)| (k, v.get())).collect(),
-        }
-    }
-}
+use nodegraph_runtime::prelude::ParamStore;
+use nodegraph_widgets::bool_input::{bool_input, BoolInputProps, BoolValueWrapper};
+use nodegraph_widgets::color_input::{color_input, ColorInputProps, ColorValueWrapper};
+use nodegraph_widgets::float_input::{float_input, FloatInputProps, FloatValueWrapper};
+use nodegraph_widgets::int_input::{int_input, IntInputProps, IntValueWrapper};
+use nodegraph_widgets::string_input::{string_input, StringInputProps, StringValueWrapper};
 
 /// Default float values per node type + port label.
 pub fn default_float(type_id: &str, label: &str) -> f64 {
     match (type_id, label) {
-        ("checker", "Size") => 4.0,
+        ("const_float", "Value") => 1.0,
         ("noise", "Scale") => 5.0,
-        ("noise", "Seed") => 1.0,
-        ("brick", "Rows") => 4.0,
         ("mix", "Factor") => 0.5,
         ("brightness_contrast", "Brightness") => 0.0,
         ("brightness_contrast", "Contrast") => 0.0,
         ("threshold", "Level") => 0.5,
         _ => 0.0,
     }
+}
+
+/// Default integer values per node type + port label.
+pub fn default_int(type_id: &str, label: &str) -> i64 {
+    match (type_id, label) {
+        ("const_int", "Value") => 1,
+        ("checker", "Size") => 4,
+        ("noise", "Seed") => 1,
+        ("brick", "Rows") => 4,
+        _ => 0,
+    }
+}
+
+/// Default boolean values per node type + port label.
+pub fn default_bool(type_id: &str, label: &str) -> bool {
+    matches!((type_id, label), ("brick", "Stagger"))
+}
+
+/// Default string values per node type + port label.
+pub fn default_string(_type_id: &str, _label: &str) -> String {
+    String::new()
 }
 
 /// Default color values per node type + port label.
@@ -99,23 +59,72 @@ pub fn default_color(type_id: &str, label: &str) -> [u8; 4] {
     }
 }
 
-fn hex_to_rgba(hex: &str) -> [u8; 4] {
-    let hex = hex.trim_start_matches('#');
-    if hex.len() >= 6 {
-        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(200);
-        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(200);
-        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(200);
-        [r, g, b, 255]
-    } else {
-        [200, 200, 200, 255]
+/// Node types whose output port should always show an editable widget,
+/// regardless of connection state.
+pub fn is_const_output_type(type_id: &str) -> bool {
+    matches!(
+        type_id,
+        "solid_color" | "const_float" | "const_int" | "const_bool" | "const_string"
+    )
+}
+
+fn port_label(gs: &Rc<GraphSignals>, port_id: EntityId) -> String {
+    gs.with_graph(|g| {
+        g.world
+            .get::<nodegraph_core::graph::port::PortLabel>(port_id)
+            .map(|l| l.0.clone())
+            .unwrap_or_default()
+    })
+}
+
+fn widget_for(
+    params: &ParamStore,
+    port_id: EntityId,
+    socket_type: SocketType,
+    type_id: &str,
+    label: &str,
+) -> Option<dominator::Dom> {
+    match socket_type {
+        SocketType::Float => {
+            let default = default_float(type_id, label);
+            let mutable = params.get::<f64>(port_id, default);
+            Some(float_input(
+                FloatInputProps::new().value(Box::new(mutable) as Box<dyn FloatValueWrapper>),
+            ))
+        }
+        SocketType::Int => {
+            let default = default_int(type_id, label);
+            let mutable = params.get::<i64>(port_id, default);
+            Some(int_input(
+                IntInputProps::new().value(Box::new(mutable) as Box<dyn IntValueWrapper>),
+            ))
+        }
+        SocketType::Bool => {
+            let default = default_bool(type_id, label);
+            let mutable = params.get::<bool>(port_id, default);
+            Some(bool_input(
+                BoolInputProps::new().value(Box::new(mutable) as Box<dyn BoolValueWrapper>),
+            ))
+        }
+        SocketType::String => {
+            let default = default_string(type_id, label);
+            let mutable = params.get::<String>(port_id, default);
+            Some(string_input(
+                StringInputProps::new().value(Box::new(mutable) as Box<dyn StringValueWrapper>),
+            ))
+        }
+        SocketType::Color => {
+            let default = default_color(type_id, label);
+            let mutable = params.get::<[u8; 4]>(port_id, default);
+            Some(color_input(
+                ColorInputProps::new().value(Box::new(mutable) as Box<dyn ColorValueWrapper>),
+            ))
+        }
+        _ => None,
     }
 }
 
-fn rgba_to_hex(c: [u8; 4]) -> String {
-    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
-}
-
-/// Build the port_widget callback for the texture generator.
+/// Build the `port_widget` callback for the texture generator.
 #[allow(clippy::type_complexity)]
 pub fn make_port_widget(
     params: &Rc<ParamStore>,
@@ -132,83 +141,18 @@ pub fn make_port_widget(
 > {
     let params = params.clone();
     Rc::new(
-        move |_node_id, port_id, socket_type, port_dir, type_id, is_connected, _gs| {
-            // Solid Color: always show color picker on its output port
-            if type_id == "solid_color" && port_dir == PortDirection::Output {
-                let label = _gs.with_graph(|g| {
-                    g.world
-                        .get::<nodegraph_core::graph::port::PortLabel>(port_id)
-                        .map(|l| l.0.clone())
-                        .unwrap_or_default()
-                });
-                let default = default_color(type_id, &label);
-                let mutable = params.get_color(port_id, default);
-                return Some(color_picker(mutable));
-            }
+        move |_node_id, port_id, socket_type, port_dir, type_id, is_connected, gs| {
+            let show_on_output = port_dir == PortDirection::Output && is_const_output_type(type_id);
+            let show_on_input = port_dir == PortDirection::Input && !is_connected;
 
-            // Only show widgets on disconnected input ports
-            if port_dir != PortDirection::Input || is_connected {
+            if !show_on_output && !show_on_input {
                 return None;
             }
 
-            match socket_type {
-                SocketType::Float => {
-                    let label = _gs.with_graph(|g| {
-                        g.world
-                            .get::<nodegraph_core::graph::port::PortLabel>(port_id)
-                            .map(|l| l.0.clone())
-                            .unwrap_or_default()
-                    });
-                    let default = default_float(type_id, &label);
-                    let mutable = params.get_float(port_id, default);
-                    Some(float_input(FloatInputProps::new().value(
-                        Box::new(mutable) as Box<dyn nodegraph_widgets::FloatValueWrapper>
-                    )))
-                }
-                SocketType::Color => {
-                    let label = _gs.with_graph(|g| {
-                        g.world
-                            .get::<nodegraph_core::graph::port::PortLabel>(port_id)
-                            .map(|l| l.0.clone())
-                            .unwrap_or_default()
-                    });
-                    let default = default_color(type_id, &label);
-                    let mutable = params.get_color(port_id, default);
-                    Some(color_picker(mutable))
-                }
-                _ => None,
-            }
+            let label = port_label(gs, port_id);
+            widget_for(&params, port_id, socket_type, type_id, &label)
         },
     )
-}
-
-/// Minimal inline color picker: a small swatch that wraps an `<input type="color">`.
-fn color_picker(value: Mutable<[u8; 4]>) -> dominator::Dom {
-    html!("div", {
-        .attr("data-port-widget", "")
-        .dwclass!("relative w-full h-4 pointer-events-auto")
-
-        // Visible swatch
-        .child(html!("div", {
-            .dwclass!("w-full h-full rounded-sm border border-gray-600 cursor-pointer")
-            .style_signal("background", value.signal().map(|c| {
-                format!("rgb({},{},{})", c[0], c[1], c[2])
-            }))
-        }))
-
-        // Hidden native color input overlaid
-        .child(html!("input" => web_sys::HtmlInputElement, {
-            .attr("type", "color")
-            .dwclass!("absolute top-0 left-0 w-full h-full cursor-pointer")
-            .style("opacity", "0")
-            .attr_signal("value", value.signal().map(rgba_to_hex))
-            .event(clone!(value => move |e: events::Input| {
-                let target: web_sys::HtmlInputElement = e.target().unwrap().unchecked_into();
-                let hex = target.value();
-                value.set(hex_to_rgba(&hex));
-            }))
-        }))
-    })
 }
 
 #[cfg(test)]
@@ -218,20 +162,31 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn default_float_known() {
-        assert_eq!(default_float("checker", "Size"), 4.0);
         assert_eq!(default_float("noise", "Scale"), 5.0);
-        assert_eq!(default_float("noise", "Seed"), 1.0);
         assert_eq!(default_float("threshold", "Level"), 0.5);
     }
 
     #[wasm_bindgen_test]
-    fn default_float_unknown_zero() {
-        assert_eq!(default_float("nonexistent", "Whatever"), 0.0);
+    fn default_int_known() {
+        assert_eq!(default_int("checker", "Size"), 4);
+        assert_eq!(default_int("noise", "Seed"), 1);
+        assert_eq!(default_int("brick", "Rows"), 4);
+    }
+
+    #[wasm_bindgen_test]
+    fn default_bool_known() {
+        assert!(default_bool("brick", "Stagger"));
+        assert!(!default_bool("anything", "else"));
     }
 
     #[wasm_bindgen_test]
     fn default_color_known() {
         assert_eq!(default_color("solid_color", "Color"), [139, 105, 20, 255]);
+    }
+
+    #[wasm_bindgen_test]
+    fn default_float_unknown_zero() {
+        assert_eq!(default_float("nonexistent", "Whatever"), 0.0);
     }
 
     #[wasm_bindgen_test]
@@ -243,44 +198,9 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    fn get_float_default() {
-        use nodegraph_core::store::World;
-        let mut world = World::new();
-        let id = world.spawn();
-
-        let store = ParamStore::new();
-        let m = store.get_float(id, 3.5);
-        assert_eq!(m.get(), 3.5);
-    }
-
-    #[wasm_bindgen_test]
-    fn get_float_same_mutable() {
-        use nodegraph_core::store::World;
-        let mut world = World::new();
-        let id = world.spawn();
-
-        let store = ParamStore::new();
-        let m1 = store.get_float(id, 1.0);
-        let m2 = store.get_float(id, 999.0); // default ignored on second call
-        m1.set(42.0);
-        assert_eq!(m2.get(), 42.0);
-    }
-
-    #[wasm_bindgen_test]
-    fn get_color_default() {
-        use nodegraph_core::store::World;
-        let mut world = World::new();
-        let id = world.spawn();
-
-        let store = ParamStore::new();
-        let m = store.get_color(id, [10, 20, 30, 255]);
-        assert_eq!(m.get(), [10, 20, 30, 255]);
-    }
-
-    #[wasm_bindgen_test]
-    fn hex_rgba_roundtrip() {
-        assert_eq!(hex_to_rgba("#8b6914"), [139, 105, 20, 255]);
-        let hex = rgba_to_hex([139, 105, 20, 255]);
-        assert_eq!(hex_to_rgba(&hex), [139, 105, 20, 255]);
+    fn is_const_output_matches() {
+        assert!(is_const_output_type("const_float"));
+        assert!(is_const_output_type("solid_color"));
+        assert!(!is_const_output_type("noise"));
     }
 }
